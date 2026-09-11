@@ -9,6 +9,15 @@
       "password": "${env:SAP_DEV_PASSWORD}",
       "allowSelfSigned": true
     },
+    "FD2": {
+      "url": "https://sap-fd2.example.com",
+      "client": "100",
+      "username": "MYUSER",
+      "auth": "sso",
+      "caCert": "C:\\certs\\corp-ca.pem",
+      "noProxy": true,
+      "sso": { "headless": true, "timeout": 300 }
+    },
     "QAS": {
       "url": "https://sap-qas.example.com:44300",
       "client": "100",

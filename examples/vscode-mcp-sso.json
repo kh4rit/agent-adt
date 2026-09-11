@@ -1,0 +1,17 @@
+{
+  "servers": {
+    "abap": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["C:\\tools\\abap-adt-mcp\\dist\\index.js"],
+      "env": {
+        "SAP_URL": "https://sap-fd2.example.com",
+        "SAP_CLIENT": "100",
+        "SAP_USER": "MYUSER",
+        "SAP_AUTH": "sso",
+        "SAP_CA_CERT": "C:\\certs\\corp-ca.pem",
+        "SAP_NO_PROXY": "true"
+      }
+    }
+  }
+}

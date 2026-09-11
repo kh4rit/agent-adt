@@ -7,6 +7,7 @@ ABAP Development Tools for AI agents. An [MCP](https://modelcontextprotocol.io) 
 GitHub Copilot, Claude Code, Cursor and any other MCP client the core ADT workflow against a
 real SAP system:
 
+- **log on** with user/password **or single sign-on** (SAML / Entra ID) through your browser session
 - **search** repository objects by name pattern
 - **read** the source of classes, programs, includes, function modules, CDS views ...
 - **edit / write** source, recorded in a **transport request** when the package is transportable
@@ -71,6 +72,72 @@ node dist\index.js --check
 | `SAP_READ_ONLY` | `true` disables every tool that changes the system |
 | `SAP_TIMEOUT` | HTTP timeout in ms (default 120000) |
 
+### Authentication modes
+
+| `auth` / `SAP_AUTH` | Credentials | When to use |
+|---|---|---|
+| `basic` (default) | `password` / `SAP_PASSWORD` | Systems that accept user + password on `/sap/bc/adt` |
+| `sso` | none: the server logs on through a browser | Systems that redirect ADT to a SAML identity provider (Microsoft Entra ID, SAP IAS, ADFS ...) and reject passwords |
+| `cookie` | `cookie` / `SAP_COOKIE`: a cookie header such as `MYSAPSSO2=...; SAP_SESSIONID_FD2_100=...` | Quick tests: paste the cookies of a logged-on browser (DevTools > Application > Cookies). No automatic refresh |
+| `bearer` | `bearerToken` / `SAP_BEARER_TOKEN` | Systems with OAuth 2.0 for ADT |
+
+`username` is needed in every mode: it is not used to log on with sso/cookie/bearer but for the
+transport list default and for display.
+
+#### Single sign-on through the browser (`auth: "sso"`)
+
+How it works: the server starts Microsoft Edge or Google Chrome with a dedicated profile on the
+ADT discovery URL of the system. SAP redirects to the identity provider, the browser completes
+the logon (silently when the identity provider already knows the device or user; otherwise a
+window opens and you log on as usual, including MFA) and lands on the SAP host again. The
+server watches the browser's cookie store, copies the SAP cookies (`SAP_SESSIONID_<SID>_<client>`,
+`MYSAPSSO2`), closes the browser and uses the cookies for all ADT calls. When SAP later rejects
+them (HTTP 401 or the SAML redirect page instead of ADT data) the logon runs again, silently
+first, and the failed call is retried once. Cookies are cached in
+`~/.abap-adt-mcp/<system>.cookies.json` (`%USERPROFILE%\.abap-adt-mcp` on Windows, owner-only
+permissions) so restarts of the MCP server do not need a new logon. The browser profile
+`~/.abap-adt-mcp/browser-profile` keeps the identity provider session.
+
+Setup:
+
+```powershell
+$env:SAP_URL="https://sap-dev.example.com"; $env:SAP_CLIENT="100"; $env:SAP_USER="MYUSER"; $env:SAP_AUTH="sso"
+node dist\index.js --sso-login     # opens the browser, log on once, cookies are cached
+node dist\index.js --check         # verifies ADT access with the cached cookies
+```
+
+After the logon the browser may briefly show or offer to download the ADT discovery XML; that
+is expected, the window closes on its own once the cookies are captured.
+
+`--sso-login` is optional: the first tool call opens the browser as well. Requires Node.js 22+
+(the browser is driven over the DevTools protocol with Node's built-in WebSocket) and a
+Chromium based browser. Settings (config file `sso: { ... }` or environment):
+
+| Setting | Env | Meaning |
+|---|---|---|
+| `browser` | `SAP_SSO_BROWSER` | Path of `msedge.exe` / `chrome.exe`; auto-detected when omitted |
+| `profileDir` | `SAP_SSO_PROFILE_DIR` | Browser profile directory keeping the identity provider session |
+| `cacheFile` | `SAP_SSO_CACHE_FILE` | Where the SAP cookies are cached |
+| `loginUrl` | `SAP_SSO_LOGIN_URL` | URL to open; default `<url>/sap/bc/adt/discovery?sap-client=<client>` |
+| `headless` | `SAP_SSO_HEADLESS` | `false` to always open a visible window (default: try silently first, 30 s) |
+| `timeout` | `SAP_SSO_TIMEOUT` | Seconds to wait for the interactive logon (default 300) |
+| `maxAgeHours` | `SAP_SSO_MAX_AGE_HOURS` | Re-logon after this many hours even without a rejection (default 8) |
+
+In sso and cookie mode reads and writes share one SAP session (the library cannot clone a
+client with an injected HTTP layer); tool calls are handled sequentially anyway.
+
+#### Corporate network caveats (proxy, TLS interception)
+
+- **Proxy:** if `HTTPS_PROXY` is set (or Node runs with `NODE_USE_ENV_PROXY=1`), requests to an
+  internal SAP host go through the proxy and typically fail with `ERR_PROXY_TUNNEL` / 502. Add the
+  SAP host to `NO_PROXY`, or set `noProxy: true` / `SAP_NO_PROXY=true` and the server does it.
+- **TLS interception (Zscaler and similar):** Node then reports
+  `self-signed certificate in certificate chain`. Export the corporate root certificates to a PEM
+  file and point `caCert` / `SAP_CA_CERT` (or `NODE_EXTRA_CA_CERTS`) at it. `allowSelfSigned`
+  works too but disables certificate checks entirely.
+- Always use the URL you use in Eclipse / the browser (usually the web dispatcher); direct ICM
+  ports are often firewalled.
+
 ### Several systems via a JSON file
 
 Point `ABAP_ADT_CONFIG` (or `--config <file>`) to a file like
@@ -81,6 +148,7 @@ Point `ABAP_ADT_CONFIG` (or `--config <file>`) to a file like
   "defaultSystem": "DEV",
   "systems": {
     "DEV": { "url": "https://sap-dev:44300", "client": "100", "username": "DEVELOPER", "password": "${env:SAP_DEV_PASSWORD}", "allowSelfSigned": true },
+    "FD2": { "url": "https://sap-fd2.example.com", "client": "100", "username": "MYUSER", "auth": "sso", "caCert": "C:\\certs\\corp-ca.pem", "noProxy": true },
     "QAS": { "url": "https://sap-qas:44300", "client": "100", "username": "DEVELOPER", "password": "${env:SAP_QAS_PASSWORD}", "readOnly": true }
   }
 }
@@ -119,7 +187,10 @@ the file. Tools take an optional `system` parameter; without it the default syst
    ```
 
    VS Code asks for the password once and stores it in its secret storage.
-   For several systems use [examples/vscode-mcp-multi-system.json](examples/vscode-mcp-multi-system.json).
+   For several systems use [examples/vscode-mcp-multi-system.json](examples/vscode-mcp-multi-system.json);
+   for a system with single sign-on (no password at all) use
+   [examples/vscode-mcp-sso.json](examples/vscode-mcp-sso.json) and read
+   [Authentication modes](#authentication-modes).
 3. Open Copilot Chat in **Agent** mode, click the tools icon and make sure the `abap` tools are
    enabled. Then ask, for example:
 
@@ -231,7 +302,9 @@ The tests replace the HTTP layer of `abap-adt-api` with canned ADT responses, so
 lock / transport / save / activate flow is verified without a backend. Source layout:
 
 - `src/config.ts` configuration loading
-- `src/connection.ts` ADT client, stateful locking session, per-system serialisation
+- `src/connection.ts` ADT client, authentication modes, stateful locking session, per-system serialisation
+- `src/cookieHttp.ts` cookie based HTTP layer with expiry detection and re-logon
+- `src/sso.ts` browser single sign-on (DevTools protocol) and cookie cache
 - `src/objects.ts` name / URI resolution to source, lock and activation URLs
 - `src/services/` read, write, activation, transports, object creation, navigation
 - `src/tools.ts` MCP tool definitions
@@ -242,5 +315,6 @@ lock / transport / save / activate flow is verified without a backend. Source la
 - Only object types with plain ABAP source can be written (classes, interfaces, programs,
   includes, function modules, CDS/DDL sources). DDIC objects (tables, data elements) can be
   read as XML but not changed.
-- Basic authentication only. For SSO/certificate logons, front the server with a user that has
-  a password, or extend `src/connection.ts` (the underlying library supports bearer tokens).
+- SSO logon needs a Chromium based browser on the machine running the server and Node.js 22+.
+  Kerberos/SPNEGO and X.509 client certificates are not implemented; a static `cookie` or a
+  `bearer` token can be used instead.
