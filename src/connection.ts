@@ -2,9 +2,23 @@ import https from "node:https"
 import { readFileSync } from "node:fs"
 import { ADTClient, session_types } from "abap-adt-api"
 import type { AdtLock, ClientOptions, HttpClient } from "abap-adt-api"
+import { AxiosHttpClient } from "abap-adt-api/build/AxiosHttpClient.js"
 import type { Config, SystemConfig } from "./config.js"
+import { CookieAuthHttpClient, type CookieProvider } from "./cookieHttp.js"
+import { BrowserSsoProvider, StaticCookieProvider } from "./sso.js"
 
 export class SystemError extends Error {}
+
+const log = (system: string) => (message: string) => console.error(`[${system}] ${message}`)
+
+/** Adds the host to NO_PROXY so corporate proxies are bypassed for internal SAP systems. */
+export function bypassProxy(url: string, env: NodeJS.ProcessEnv = process.env) {
+  const host = new URL(url).hostname
+  for (const key of ["NO_PROXY", "no_proxy"]) {
+    const current = (env[key] ?? "").split(",").map(s => s.trim()).filter(Boolean)
+    if (!current.some(h => h.toLowerCase() === host.toLowerCase())) env[key] = [...current, host].join(",")
+  }
+}
 
 /**
  * One SAP system: owns an ADT client used for stateful operations (lock / write / unlock)
@@ -12,6 +26,8 @@ export class SystemError extends Error {}
  */
 export class AbapSystem {
   readonly client: ADTClient
+  /** set for auth = sso: allows the CLI to trigger / inspect the browser logon */
+  readonly sso?: BrowserSsoProvider
   private readonly singleSession: boolean
   private queue: Promise<unknown> = Promise.resolve()
 
@@ -27,19 +43,50 @@ export class AbapSystem {
         keepAlive: true
       })
     }
-    this.client = new ADTClient(
-      httpClient ?? config.url,
-      config.username,
-      config.password,
-      config.client ?? "",
-      config.language ?? "",
-      options
-    )
-    this.singleSession = !!httpClient
+    if (config.noProxy) bypassProxy(config.url)
+
+    let http = httpClient
+    let password: string | (() => Promise<string>) = config.password ?? ""
+    if (!http) {
+      let provider: CookieProvider | undefined
+      if (this.auth === "sso") {
+        const sso = config.sso ?? {}
+        this.sso = new BrowserSsoProvider({
+          system: config.name,
+          baseUrl: config.url,
+          client: config.client,
+          language: config.language,
+          browser: sso.browser,
+          profileDir: sso.profileDir,
+          cacheFile: sso.cacheFile,
+          loginUrl: sso.loginUrl,
+          headless: sso.headless,
+          timeoutSeconds: sso.timeout,
+          maxAgeHours: sso.maxAgeHours,
+          log: log(config.name)
+        })
+        provider = this.sso
+      } else if (this.auth === "cookie") provider = new StaticCookieProvider(config.cookie ?? "")
+      if (provider) {
+        http = new CookieAuthHttpClient(new AxiosHttpClient(config.url, options), provider, log(config.name))
+        password = ""
+      } else if (this.auth === "bearer") {
+        const token = config.bearerToken ?? ""
+        password = async () => token
+      }
+    }
+    this.client = new ADTClient(http ?? config.url, config.username, password, config.client ?? "", config.language ?? "", options)
+    // cookie based logons share one SAP session between reads and writes: the library cannot
+    // clone a client that uses an injected HTTP layer
+    this.singleSession = !!http
   }
 
   get name() {
     return this.config.name
+  }
+
+  get auth() {
+    return this.config.auth ?? "basic"
   }
 
   get user() {

@@ -24,6 +24,8 @@ interface Route {
 export class FakeHttp implements HttpClient {
   calls: Call[] = []
   private routes: Route[] = []
+  /** optional hook answering a call before the routes are consulted */
+  intercept?: (call: Call) => HttpResponse | undefined
 
   on(method: string | undefined, match: string | RegExp, reply: Reply | ((call: Call) => Reply)) {
     // later registrations win, so tests can override a default route
@@ -47,6 +49,8 @@ export class FakeHttp implements HttpClient {
       headers: (options.headers ?? {}) as Record<string, string>
     }
     this.calls.push(call)
+    const intercepted = this.intercept?.(call)
+    if (intercepted) return intercepted
     if (call.url === "/sap/bc/adt/compatibility/graph")
       return {
         status: 200,
@@ -67,4 +71,4 @@ export class FakeHttp implements HttpClient {
 
 export const testConfig: SystemConfig = { name: "TST", url: "http://fake", username: "developer", password: "secret", client: "001" }
 
-export const makeSystem = (fake: FakeHttp, config: Partial<SystemConfig> = {}) => new AbapSystem({ ...testConfig, ...config }, fake)
+export const makeSystem = (http: HttpClient, config: Partial<SystemConfig> = {}) => new AbapSystem({ ...testConfig, ...config }, http)
