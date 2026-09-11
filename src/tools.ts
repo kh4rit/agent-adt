@@ -66,7 +66,7 @@ export function registerTools(server: McpServer, systems: Systems) {
       run(async () => {
         const lines = systems.list().map(s => {
           const c = s.config
-          return `- ${c.name}${c.name === systems.defaultName ? " (default)" : ""}: ${c.url} client ${c.client ?? "default"} user ${c.username}${c.readOnly ? "  READ-ONLY" : ""}`
+          return `- ${c.name}${c.name === systems.defaultName ? " (default)" : ""}: ${c.url} client ${c.client ?? "default"} user ${c.username} auth ${s.auth}${c.readOnly ? "  READ-ONLY" : ""}`
         })
         return `Configured systems:\n${lines.join("\n")}`
       })
