@@ -1,0 +1,17 @@
+{
+  "inputs": [
+    { "type": "promptString", "id": "sap-dev-password", "description": "SAP DEV password", "password": true },
+    { "type": "promptString", "id": "sap-qas-password", "description": "SAP QAS password", "password": true }
+  ],
+  "servers": {
+    "abap": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["C:\\tools\\abap-adt-mcp\\dist\\index.js", "--config", "C:\\tools\\abap-adt-mcp\\abap-adt-mcp.json"],
+      "env": {
+        "SAP_DEV_PASSWORD": "${input:sap-dev-password}",
+        "SAP_QAS_PASSWORD": "${input:sap-qas-password}"
+      }
+    }
+  }
+}

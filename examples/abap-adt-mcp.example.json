@@ -1,0 +1,21 @@
+{
+  "defaultSystem": "DEV",
+  "systems": {
+    "DEV": {
+      "url": "https://sap-dev.example.com:44300",
+      "client": "100",
+      "language": "EN",
+      "username": "DEVELOPER",
+      "password": "${env:SAP_DEV_PASSWORD}",
+      "allowSelfSigned": true
+    },
+    "QAS": {
+      "url": "https://sap-qas.example.com:44300",
+      "client": "100",
+      "username": "DEVELOPER",
+      "password": "${env:SAP_QAS_PASSWORD}",
+      "caCert": "C:\\certs\\corporate-ca.pem",
+      "readOnly": true
+    }
+  }
+}
