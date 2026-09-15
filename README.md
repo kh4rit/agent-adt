@@ -157,6 +157,12 @@ Point `ABAP_ADT_CONFIG` (or `--config <file>`) to a file like
 `${env:NAME}` placeholders are replaced from the environment, so passwords never have to be in
 the file. Tools take an optional `system` parameter; without it the default system is used.
 
+## Using it with GitHub Copilot CLI
+
+Follow the [GitHub Copilot CLI setup guide](docs/github-copilot-cli.md) for
+Windows/PowerShell instructions covering system configuration, browser SSO, corporate
+CA certificates, MCP registration, optional skill registration and troubleshooting.
+
 ## Using it with GitHub Copilot in VS Code (Windows)
 
 1. Build the server as described above, e.g. into `C:\tools\abap-adt-mcp`.
