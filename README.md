@@ -162,6 +162,8 @@ the file. Tools take an optional `system` parameter; without it the default syst
 Follow the [GitHub Copilot CLI setup guide](docs/github-copilot-cli.md) for
 Windows/PowerShell instructions covering system configuration, browser SSO, corporate
 CA certificates, MCP registration, optional skill registration and troubleshooting.
+The [ABAP ADT agent behavior guide](skills/abap-adt/SKILL.md) covers tool selection,
+transports, source changes, activation and testing.
 
 ## Using it with GitHub Copilot in VS Code (Windows)
 

@@ -4,3 +4,5 @@ dist/
 .DS_Store
 abap-adt-mcp.json
 .env
+corp-ca.pem
+*.cookies.json
