@@ -151,9 +151,8 @@ logon. Check with `copilot mcp list`, or `/mcp` inside an interactive session.
 
 ## 6. Register the skill (optional)
 
-This repository does not currently include `skills/abap-adt/SKILL.md`. Skip this
-step unless you have obtained that skill separately. The commands below assume
-you have placed it at that path in your local clone. MCP tools work without it.
+This repository includes the [ABAP ADT agent skill](../skills/abap-adt/SKILL.md).
+Register it with the commands below. MCP tools work without it.
 
 The MCP server supplies the *tools*; the skill tells the agent *how to use them*
 (transport handling, activation, file layout for downloads, troubleshooting).
