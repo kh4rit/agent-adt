@@ -5,7 +5,7 @@ import { line, plural } from "../format.js"
 
 export class TransportRequiredError extends Error {}
 
-function candidates(info: TransportInfo): string {
+export function candidates(info: TransportInfo): string {
   const list = info.TRANSPORTS ?? []
   if (!list.length) return "  (no modifiable transport request of yours contains this package yet)"
   return list.map(t => `  - ${t.TRKORR}  ${t.AS4TEXT ?? ""}  (owner ${t.AS4USER}, status ${t.TRSTATUS})`).join("\n")

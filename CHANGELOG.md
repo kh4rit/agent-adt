@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+- `abap_deploy_ui5_app`: deploy a built SAPUI5 / Fiori app (dist folder or zip) to the SAPUI5
+  ABAP repository through the OData service `fiori deploy` uses, with the server's logon
+  (basic, SSO cookies, bearer). Test mode by default, transport rules as for source changes
+  (never created automatically), SAP message log returned verbatim, safe mode conflicts and
+  inactive service reported with guidance
+- `abap_ui5_app_info`: package, description, URL and file inventory of a deployed app
+- Dependency-free zip writer / reader
+
 ## 0.2.0
 
 - Authentication modes: `basic`, `sso` (browser single sign-on for SAML / Entra ID systems),

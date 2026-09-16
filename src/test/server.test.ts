@@ -24,7 +24,9 @@ const EXPECTED_TOOLS = [
   "abap_find_usages",
   "abap_package_contents",
   "abap_object_outline",
-  "abap_run_unit_tests"
+  "abap_run_unit_tests",
+  "abap_deploy_ui5_app",
+  "abap_ui5_app_info"
 ]
 
 async function connect(fake: FakeHttp) {

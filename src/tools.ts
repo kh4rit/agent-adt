@@ -8,6 +8,7 @@ import { activateInactive, activateObject, formatActivation, formatInactive, ina
 import { createTransportFor, describeTransportInfo, listTransports } from "./services/transports.js"
 import { createObject, supportedCreateTypes } from "./services/create.js"
 import { findUsages, outline, packageContents, runUnitTests } from "./services/navigation.js"
+import { deployUi5App, ui5AppInfo } from "./services/ui5.js"
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean }
 
@@ -441,6 +442,48 @@ export function registerTools(server: McpServer, systems: Systems) {
         const system = systems.get(args.system)
         const obj = await resolveObject(system, spec(args))
         return truncate(await runUnitTests(system, obj), 60000)
+      })
+  )
+
+  server.registerTool(
+    "abap_deploy_ui5_app",
+    {
+      title: "Deploy SAPUI5 / Fiori app",
+      description:
+        "Uploads a built SAPUI5/Fiori application (the dist folder produced by `npm run build`, or a prepared zip) to the SAPUI5 ABAP repository as BSP application, through the same OData service `fiori deploy` / `npm run deploy` uses, but with this server's SAP session (works with SSO systems where the Fiori tools cannot log on). Parameters correspond to ui5-deploy.yaml: app.name, app.package, app.transport, app.description, exclude. testMode defaults to true: SAP checks the upload and returns its message log without changing anything; call again with testMode=false to deploy. Transportable packages need `transport`; the tool never creates one.",
+      inputSchema: {
+        name: z.string().describe("BSP application name (app.name in ui5-deploy.yaml), e.g. ZMY_APP or /NAMESPACE/MY_APP."),
+        source: z.string().describe("Path of the built app: the dist folder after `npm run build` (zipped by the tool), or a .zip file whose root contains manifest.json."),
+        package: z.string().optional().describe("ABAP package, e.g. ZMY_APPS or /NAMESPACE/PKG (app.package). Required for a new application; ignored for an existing one (its package cannot change)."),
+        transport: z.string().optional().describe("Transport request or task, e.g. DEVK900123 (app.transport). Required for transportable packages; local packages ($TMP) need none."),
+        description: z.string().optional().describe("Description of the BSP application (app.description). Default: the existing one, or 'Deployed with abap-adt-mcp'."),
+        exclude: z.array(z.string()).optional().describe("Regular expressions of paths to leave out, tested against the path relative to the source folder with a leading slash, like `exclude` in ui5-deploy.yaml, e.g. [\"/test/\", \"\\\\.map$\"]."),
+        testMode: z.boolean().optional().describe("true (default): SAP simulates the upload and returns the check log, nothing is changed. false: really deploy."),
+        safeMode: z.boolean().optional().describe("false lets SAP overwrite an application that was built from a different sap.app/id (HTTP 412 otherwise). Default: SAP's safe mode."),
+        system: systemParam
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }
+    },
+    args =>
+      run(async () => {
+        const system = systems.get(args.system)
+        return deployUi5App(system, args)
+      })
+  )
+
+  server.registerTool(
+    "abap_ui5_app_info",
+    {
+      title: "Deployed SAPUI5 app info",
+      description:
+        "Shows a deployed SAPUI5/Fiori application (BSP application in the SAPUI5 ABAP repository): package, description, URL and the file inventory with sizes, so the build result can be compared before deploying with abap_deploy_ui5_app.",
+      inputSchema: { name: z.string().describe("BSP application name, e.g. ZMY_APP or /NAMESPACE/MY_APP."), system: systemParam },
+      annotations: readOnly
+    },
+    args =>
+      run(async () => {
+        const system = systems.get(args.system)
+        return truncate(await ui5AppInfo(system, args.name), 60000)
       })
   )
 }

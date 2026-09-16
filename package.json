@@ -1,6 +1,6 @@
 {
   "name": "abap-adt-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "ABAP Development Tools for AI agents: an MCP server exposing SAP ADT (search, read, write to transports, activate) to Copilot, Claude Code and other MCP clients",
   "main": "dist/index.js",
   "scripts": {

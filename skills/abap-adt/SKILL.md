@@ -43,6 +43,8 @@ registration and skill registration, follow the
 | Activate changes | `abap_activate` activates specified objects and returns the activation log. |
 | Inspect pending activation | `abap_inactive_objects` lists the current user's inactive objects and transports. |
 | Test behavior | `abap_run_unit_tests` runs ABAP Unit for the relevant object. |
+| Deploy a SAPUI5 / Fiori app | `abap_deploy_ui5_app` uploads a built app (dist folder or zip) to the SAPUI5 ABAP repository. Test mode by default. |
+| Inspect a deployed SAPUI5 app | `abap_ui5_app_info` shows package, description, URL and file inventory of a BSP application. |
 
 ## Read, change and validate
 
@@ -78,6 +80,26 @@ registration and skill registration, follow the
    class tests. Inspect failures and fix regressions caused by the change. Report
    the system, changed objects, actual transport used, activation outcome and test
    results; distinguish tests that passed from tests that could not run.
+
+## Deploying a SAPUI5 / Fiori app
+
+`abap_deploy_ui5_app` replaces `npm run deploy` / `fiori deploy` when those cannot log on
+(SAML single sign-on, BAS-only destinations). It sends the same request to the same SAP
+service, with the server's session.
+
+1. Build the app first (`npm run build` or the project's build script); the tool uploads
+   the build result in `dist` and does not build. Never point `source` at the project or
+   `webapp` folder.
+2. Take `app.name`, `app.package`, `app.transport`, `app.description` and `exclude` from
+   `ui5-deploy.yaml` (or from the user) and pass them unchanged. Ask the user for the
+   transport when the file has none and the package is transportable; do not pick one
+   yourself and do not create one unless the user asked for it.
+3. Run with the default `testMode: true` and show the user the SAP check log. Only after
+   the log is clean (or the user accepts the warnings) call again with `testMode: false`.
+4. Report the SAP messages, the transport and the app URL from the result. Verify with
+   `abap_ui5_app_info` (file inventory) or `abap_package_contents` (the `WAPA` object).
+5. An HTTP 412 means the existing application was built from a different `sap.app/id`;
+   confirm with the user before repeating with `safeMode: false`.
 
 ## Downloads and updates from local files
 

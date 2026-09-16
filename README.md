@@ -15,6 +15,9 @@ real SAP system:
 - **activate** objects and read the **activation errors** (object, include, line, message)
 - list inactive objects, transports, package contents, where-used, class outline, run ABAP Unit
 - create transport requests and new objects
+- **deploy built SAPUI5 / Fiori apps** to the SAPUI5 ABAP repository (BSP applications) through
+  the same service `fiori deploy` uses, with the server's logon (works where the Fiori tools
+  cannot log on, e.g. SAML single sign-on systems)
 
 It is built on [`abap-adt-api`](https://github.com/marcellourbani/abap-adt-api), the ADT client
 library behind the [ABAP remote filesystem](https://github.com/marcellourbani/vscode_abap_remote_fs)
@@ -251,6 +254,8 @@ Cursor, Windsurf, Cline and other clients use the same `command` / `args` / `env
 | `abap_package_contents` | Objects of a package grouped by type |
 | `abap_object_outline` | Methods, attributes, events of a class or interface |
 | `abap_run_unit_tests` | Run ABAP Unit and report failures |
+| `abap_deploy_ui5_app` | Upload a built SAPUI5 / Fiori app (dist folder or zip) to the SAPUI5 ABAP repository; test mode by default |
+| `abap_ui5_app_info` | Package, description, URL and file inventory of a deployed SAPUI5 app |
 
 Objects are addressed by `name` (plus `type` when the name is ambiguous) or by the ADT `uri`
 returned from the search. Classes accept an `include` parameter (`main`, `testclasses`,
@@ -272,6 +277,41 @@ returned from the search. Classes accept an `include` parameter (`main`, `testcl
 6. optionally activate (`activate: true`). Activation errors are returned with object, include,
    line and message text, and the object stays inactive until fixed.
 
+### Deploying SAPUI5 / Fiori apps
+
+`abap_deploy_ui5_app` does what `fiori deploy` (the `deploy-to-abap` task behind
+`npm run deploy` in SAP Business Application Studio) does, with the server's SAP session instead
+of the Fiori tools' own logon. That matters for systems behind SAML single sign-on, where
+`fiori deploy` only gets the identity provider's HTML page and its user/password prompt is
+useless, and for `ui5-deploy.yaml` files that target a BAS destination that does not resolve
+outside BAS.
+
+The requests are the ones the official tooling sends (`@sap-ux/deploy-tooling` /
+`@sap-ux/axios-extension`): the zipped build result goes in **one** call to the OData service
+`/sap/opu/odata/UI5/ABAP_REPOSITORY_SRV` (`POST Repositories` for a new application,
+`PUT Repositories('NAME')` for an existing one) with `TransportRequest`, `TestMode` and
+`SafeMode` as URL parameters, after the same ADT transport check. The service has to be active
+in `SICF` (it is wherever `fiori deploy` already works).
+
+Workflow for an agent:
+
+1. `npm run build` in the app project (the tool uploads the build result, it does not build).
+2. Take `app.name`, `app.package`, `app.transport`, `app.description` and `exclude` from
+   `ui5-deploy.yaml` and call `abap_deploy_ui5_app` with `source` = the `dist` folder (or a zip
+   whose root contains `manifest.json`). `testMode` defaults to **true**: SAP checks the upload
+   and returns its message log, nothing is changed.
+3. Read the log, then call again with `testMode: false`. The result contains the SAP messages,
+   the transport the change was recorded in and the app URL.
+4. `abap_ui5_app_info` lists the deployed files with sizes (on releases that support the
+   download, otherwise through the ADT filestore); `abap_package_contents` shows the BSP
+   application (`WAPA`) in its package.
+
+Rules: transportable packages need `transport` (the tool never creates one, and refuses a
+request other than the one the application is already recorded in); an existing application
+keeps its package; SAP messages are returned verbatim with their severity; an application built
+from a different `sap.app/id` is only overwritten with `safeMode: false`. Adaptation projects
+(`manifest.appdescr_variant`, layered repository) are not supported, and there is no undeploy.
+
 ### Safety
 
 - `readOnly: true` / `SAP_READ_ONLY=true` turns a system into a browse-only connection.
@@ -279,6 +319,7 @@ returned from the search. Classes accept an `include` parameter (`main`, `testcl
 - Passwords: use `${input:...}` prompts in VS Code or `${env:...}` placeholders in the config
   file instead of plain text.
 - Everything the agent saves is an inactive version until it explicitly activates it.
+- `abap_deploy_ui5_app` only simulates the upload unless it is called with `testMode: false`.
 
 ## Status
 
@@ -314,7 +355,8 @@ lock / transport / save / activate flow is verified without a backend. Source la
 - `src/cookieHttp.ts` cookie based HTTP layer with expiry detection and re-logon
 - `src/sso.ts` browser single sign-on (DevTools protocol) and cookie cache
 - `src/objects.ts` name / URI resolution to source, lock and activation URLs
-- `src/services/` read, write, activation, transports, object creation, navigation
+- `src/services/` read, write, activation, transports, object creation, navigation, UI5 deployment
+- `src/zip.ts` zip writer / reader used for the UI5 build result
 - `src/tools.ts` MCP tool definitions
 - `src/index.ts` CLI entry point (stdio transport)
 
@@ -323,6 +365,8 @@ lock / transport / save / activate flow is verified without a backend. Source la
 - Only object types with plain ABAP source can be written (classes, interfaces, programs,
   includes, function modules, CDS/DDL sources). DDIC objects (tables, data elements) can be
   read as XML but not changed.
+- UI5 deployment covers BSP applications in the SAPUI5 ABAP repository; adaptation projects
+  (layered repository) and undeployment are not implemented.
 - SSO logon needs a Chromium based browser on the machine running the server and Node.js 22+.
   Kerberos/SPNEGO and X.509 client certificates are not implemented; a static `cookie` or a
   `bearer` token can be used instead.
