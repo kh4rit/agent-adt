@@ -38,6 +38,8 @@ export interface Archive {
   files: number
   /** sap.app/id of the manifest, when found */
   appId?: string
+  /** .Ui5RepositoryIgnore when the archive has one (SAP applies its patterns server side) */
+  ignoreFile?: string
   origin: string
 }
 
@@ -234,6 +236,8 @@ function appIdOf(manifest: Buffer | undefined): string | undefined {
   }
 }
 
+const ignoreFileOf = (paths: string[]) => paths.find(p => p === ".Ui5RepositoryIgnore")
+
 function checkContents(paths: string[], hint: string) {
   if (paths.includes("manifest.appdescr_variant"))
     throw new Error("The source is an adaptation project (manifest.appdescr_variant). Those are deployed to the layered repository (LREP), which this tool does not support.")
@@ -250,14 +254,14 @@ export function loadArchive(source: string, exclude?: string[]): Archive {
     if (!entries.length) throw new Error(`Source folder ${path} contains no files${exclude?.length ? " after applying the exclude patterns" : ""}`)
     const paths = entries.map(e => e.path)
     checkContents(paths, `found: ${paths.slice(0, 5).join(", ")}${paths.length > 5 ? ", ..." : ""}`)
-    return { zip: createZip(entries), files: entries.length, appId: appIdOf(entries.find(e => e.path === "manifest.json")?.data), origin: path }
+    return { zip: createZip(entries), files: entries.length, appId: appIdOf(entries.find(e => e.path === "manifest.json")?.data), ignoreFile: ignoreFileOf(paths), origin: path }
   }
   const zip = readFileSync(path)
   const listing = readZip(zip).filter(e => !e.directory)
   const paths = listing.map(e => e.path)
   checkContents(paths, `found: ${paths.slice(0, 5).join(", ")}${paths.length > 5 ? ", ..." : ""}`)
   if (exclude?.length) throw new Error("exclude patterns only apply when source is a folder; filter the zip before passing it")
-  return { zip, files: listing.length, appId: appIdOf(listing.find(e => e.path === "manifest.json")?.data()), origin: path }
+  return { zip, files: listing.length, appId: appIdOf(listing.find(e => e.path === "manifest.json")?.data()), ignoreFile: ignoreFileOf(paths), origin: path }
 }
 
 /**
@@ -329,6 +333,8 @@ export async function deployUi5App(system: AbapSystem, o: DeployOptions): Promis
     notes.push(`the application already exists in package ${info.package}; SAP cannot move it to ${requestedPkg}, the existing package is kept`)
   const { transport, note } = await decideTransport(system, name, pkg, o.transport)
   if (note) notes.push(note)
+  if (archive.ignoreFile)
+    notes.push(`the archive contains ${archive.ignoreFile}; SAP skips the files matching its patterns, so fewer files may be stored than uploaded`)
   const description = o.description?.trim() || info.description || "Deployed with abap-adt-mcp"
   const payload = deployPayload(system.config.url.replace(/\/+$/, "") + REPOSITORY_SERVICE, name, pkg, description, archive.zip)
   const token = info.token && info.token.toLowerCase() !== "required" ? info.token : await fetchToken(system)

@@ -159,6 +159,22 @@ Point `ABAP_ADT_CONFIG` (or `--config <file>`) to a file like
 
 `${env:NAME}` placeholders are replaced from the environment, so passwords never have to be in
 the file. Tools take an optional `system` parameter; without it the default system is used.
+Every `sso` system needs its own browser logon once: after adding one, run
+`node dist/index.js --sso-login --system <name>` and then `--check --system <name>`. A UTF-8
+byte order mark at the start of the file (PowerShell's default when writing files) is fine.
+
+### Calling a tool from the command line
+
+`--call` runs one tool without an MCP host, which is handy for scripts and for checking a new
+version before the agent picks it up:
+
+```bash
+node dist/index.js --call abap_list_transports --args '{"system":"FE2"}'
+node dist/index.js --call abap_deploy_ui5_app --args @deploy.json      # arguments from a file
+```
+
+On Windows put the JSON in a file (`--args @deploy.json`) to avoid quoting problems. The exit
+code is 1 when the tool reports an error.
 
 ## Using it with GitHub Copilot CLI
 
@@ -295,16 +311,22 @@ in `SICF` (it is wherever `fiori deploy` already works).
 
 Workflow for an agent:
 
-1. `npm run build` in the app project (the tool uploads the build result, it does not build).
+1. Build the app with the deployment configuration but without the deploy task, so that
+   build-time settings of `ui5-deploy.yaml` (resource excludes such as mock data, preload
+   settings) apply: `npx ui5 build --config ui5-deploy.yaml --exclude-task=deploy-to-abap`
+   (or the project's own build script). The tool uploads the build result, it does not build.
 2. Take `app.name`, `app.package`, `app.transport`, `app.description` and `exclude` from
    `ui5-deploy.yaml` and call `abap_deploy_ui5_app` with `source` = the `dist` folder (or a zip
-   whose root contains `manifest.json`). `testMode` defaults to **true**: SAP checks the upload
-   and returns its message log, nothing is changed.
+   whose root contains `manifest.json`). `exclude` is the deploy task's list (applied to the
+   archive), not the build-time resource excludes. `testMode` defaults to **true**: SAP checks
+   the upload and returns its message log, nothing is changed.
 3. Read the log, then call again with `testMode: false`. The result contains the SAP messages,
    the transport the change was recorded in and the app URL.
 4. `abap_ui5_app_info` lists the deployed files with sizes (on releases that support the
    download, otherwise through the ADT filestore); `abap_package_contents` shows the BSP
-   application (`WAPA`) in its package.
+   application (`WAPA`) in its package. SAP stores fewer files than uploaded when the archive
+   contains a `.Ui5RepositoryIgnore` file; the deploy result says so. Repeating a deployment
+   is safe: SAP uploads only changed files into the same transport.
 
 Rules: transportable packages need `transport` (the tool never creates one, and refuses a
 request other than the one the application is already recorded in); an existing application

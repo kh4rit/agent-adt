@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { ConfigError, loadConfig } from "./config.js"
-import { createServer, SERVER_NAME, SERVER_VERSION } from "./server.js"
+import { readFileSync } from "node:fs"
+import { callTool, createServer, SERVER_NAME, SERVER_VERSION } from "./server.js"
 import { errorMessage } from "./format.js"
 
 const HELP = `${SERVER_NAME} ${SERVER_VERSION} - ABAP Development Tools MCP server
 
-Usage: abap-adt-mcp [--config <file>] [--check | --sso-login] [--system <name>]
+Usage: abap-adt-mcp [--config <file>] [--check | --sso-login | --call <tool>] [--system <name>] [--args <json>]
 
   --config <file>  JSON configuration with one or more SAP systems (or set ABAP_ADT_CONFIG)
   --check          log on to every configured system, print the result and exit
   --sso-login      open the browser to log on to the sso systems, cache the SAP cookies and exit
   --system <name>  restrict --check / --sso-login to one system
+  --call <tool>    run one tool without an MCP host and print its result, e.g.
+                   --call abap_list_transports --args '{"system":"FE2"}'
+  --args <json>    arguments of the tool: inline JSON, @file.json, or - to read stdin (default {})
   --help           show this help
 
 Without --config a single system is read from SAP_URL, SAP_USER and SAP_PASSWORD, or SAP_AUTH=sso
@@ -28,6 +32,26 @@ async function main() {
     return
   }
   const config = loadConfig(argv, process.env)
+  const callIdx = argv.indexOf("--call")
+  if (callIdx >= 0) {
+    const tool = argv[callIdx + 1]
+    if (!tool || tool.startsWith("--")) throw new Error("--call requires a tool name, e.g. --call abap_list_systems")
+    const argsIdx = argv.indexOf("--args")
+    let raw = argsIdx >= 0 ? argv[argsIdx + 1] : "{}"
+    if (raw === undefined) throw new Error("--args requires inline JSON, @file.json or -")
+    if (raw === "-") raw = readFileSync(0, "utf8")
+    else if (raw.startsWith("@")) raw = readFileSync(raw.slice(1), "utf8")
+    let args: Record<string, unknown>
+    try {
+      args = JSON.parse(raw.replace(/^\uFEFF/, ""))
+    } catch (e) {
+      throw new Error(`--args is not valid JSON: ${(e as Error).message}`)
+    }
+    const result = await callTool(config, tool, args)
+    console.log(result.text)
+    process.exitCode = result.isError ? 1 : 0
+    return
+  }
   const { server, systems } = createServer(config)
   const only = argv.indexOf("--system") >= 0 ? argv[argv.indexOf("--system") + 1] : undefined
   const selected = only ? [systems.get(only)] : systems.list()

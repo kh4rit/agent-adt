@@ -194,7 +194,7 @@ export function systemFromEnv(env: NodeJS.ProcessEnv): SystemConfig | undefined 
 export function parseConfigFile(text: string, env: NodeJS.ProcessEnv, fileName = "config"): Config {
   let raw: any
   try {
-    raw = JSON.parse(text)
+    raw = JSON.parse(text.replace(/^\uFEFF/, "")) // PowerShell writes UTF-8 files with a byte order mark
   } catch (e) {
     throw new ConfigError(`Invalid JSON in ${fileName}: ${(e as Error).message}`)
   }

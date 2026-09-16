@@ -74,18 +74,27 @@ const formatRequest = (r: TransportRequest, withObjects: boolean): string => {
   return lines.join("\n")
 }
 
-/** Lists the modifiable workbench requests of a user. */
+/** Lists the modifiable workbench and customizing requests of a user. */
 export async function listTransports(system: AbapSystem, user?: string, withObjects = false): Promise<string> {
   const who = (user?.trim() || system.user).toUpperCase()
   const all = await system.reader.userTransports(who, true)
   const out: string[] = []
-  for (const target of all.workbench) {
-    if (!target.modifiable?.length) continue
-    out.push(`Target ${target["tm:name"]} ${target["tm:desc"] ?? ""}`.trim())
-    for (const r of target.modifiable) out.push(formatRequest(r, withObjects))
+  for (const [kind, targets] of [
+    ["Workbench", all.workbench],
+    ["Customizing", all.customizing]
+  ] as const) {
+    for (const target of targets ?? []) {
+      if (!target.modifiable?.length) continue
+      out.push(`${kind} requests, target ${target["tm:name"]} ${target["tm:desc"] ?? ""}`.trim())
+      for (const r of target.modifiable) out.push(formatRequest(r, withObjects))
+    }
   }
-  if (!out.length) return `${who} has no modifiable workbench transport requests.`
-  return `Modifiable workbench transport requests of ${who}:\n${out.join("\n")}`
+  if (!out.length)
+    return (
+      `${who} has no modifiable transport requests (ADT lists the requests ${who} owns or has a task in). ` +
+      `A request of another owner can be used when it is passed explicitly: check it with abap_transport_info, or list that owner's requests with the user parameter.`
+    )
+  return `Modifiable transport requests of ${who} (own requests and requests with a task of ${who}):\n${out.join("\n")}`
 }
 
 /** Creates a workbench transport request for an object or a package. */

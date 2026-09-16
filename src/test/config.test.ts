@@ -31,6 +31,7 @@ test("config file with systems map and env references", () => {
   assert.equal(cfg.defaultSystem, "QAS")
   assert.throws(() => parseConfigFile(text, {}), /DEV_PW/)
   assert.throws(() => parseConfigFile("{ nope", {}), ConfigError)
+  assert.equal(parseConfigFile("\uFEFF" + JSON.stringify({ systems: [{ name: "BOM", url: "http://b", username: "u", password: "p" }] }), {}).systems[0].name, "BOM")
   assert.equal(expandEnvRefs("a-${env:X}-b", { X: "1" }), "a-1-b")
 })
 

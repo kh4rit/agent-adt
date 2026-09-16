@@ -2,7 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
-import { createServer } from "../server.js"
+import { callTool, createServer } from "../server.js"
 import { AbapSystem } from "../connection.js"
 import { FakeHttp, testConfig } from "./fake.js"
 import * as fx from "./fixtures.js"
@@ -74,4 +74,35 @@ test("MCP server reports errors as tool errors instead of protocol failures", as
   assert.equal(edit.isError, true)
   assert.match(text(edit), /not found/)
   await client.close()
+})
+
+const transportList = `<?xml version="1.0" encoding="utf-8"?>
+<tm:root xmlns:tm="http://www.sap.com/cts/adt/tm" tm:useraction="displaytransports">
+  <tm:workbench><tm:target tm:name="QAS" tm:desc="Quality"><tm:modifiable>
+    <tm:request tm:number="NPLK900010" tm:owner="DEVELOPER" tm:desc="Demo transport" tm:status="D" tm:uri="/sap/bc/adt/cts/transportrequests/NPLK900010">
+      <tm:task tm:number="NPLK900011" tm:owner="DEVELOPER" tm:desc="Demo transport" tm:status="D"/>
+    </tm:request>
+  </tm:modifiable><tm:released/></tm:target></tm:workbench>
+  <tm:customizing><tm:target tm:name="QAS" tm:desc="Quality"><tm:modifiable>
+    <tm:request tm:number="NPLK900030" tm:owner="OTHER" tm:desc="Customizing for demo" tm:status="D" tm:uri="/sap/bc/adt/cts/transportrequests/NPLK900030">
+      <tm:task tm:number="NPLK900031" tm:owner="DEVELOPER" tm:desc="Customizing for demo" tm:status="D"/>
+    </tm:request>
+  </tm:modifiable><tm:released/></tm:target></tm:customizing>
+</tm:root>`
+
+test("callTool runs a tool without an MCP host; transport list covers workbench and customizing requests", async () => {
+  const fake = new FakeHttp().on("GET", "/sap/bc/adt/cts/transportrequests", transportList)
+  const config = { systems: [testConfig], defaultSystem: "TST" }
+  const factory = (c: any) => new AbapSystem(c, fake)
+  const r = await callTool(config, "abap_list_transports", {}, factory)
+  assert.equal(r.isError, false)
+  assert.match(r.text, /^Modifiable transport requests of DEVELOPER \(own requests and requests with a task of DEVELOPER\):\nWorkbench requests, target QAS Quality\nNPLK900010 {2}Demo transport {2}owner DEVELOPER {2}status D\n {4}task NPLK900011/)
+  assert.match(r.text, /Customizing requests, target QAS Quality\nNPLK900030 {2}Customizing for demo {2}owner OTHER/)
+  assert.equal(fake.find("GET", "/sap/bc/adt/cts/transportrequests")[0].qs.user, "DEVELOPER")
+  const empty = await callTool(config, "abap_list_transports", { user: "nobody" }, () => new AbapSystem(testConfig, new FakeHttp().on("GET", "/sap/bc/adt/cts/transportrequests", '<tm:root xmlns:tm="http://www.sap.com/cts/adt/tm"/>')))
+  assert.match(empty.text, /NOBODY has no modifiable transport requests \(ADT lists the requests NOBODY owns or has a task in\)/)
+  const bad = await callTool(config, "abap_read_source", { name: "ZCL_DEMO", system: "PRD" }, factory)
+  assert.equal(bad.isError, true)
+  assert.match(bad.text, /Unknown system/)
+  await assert.rejects(callTool(config, "abap_nope", {}, factory), /Unknown tool "abap_nope"\. Tools: abap_list_systems/)
 })

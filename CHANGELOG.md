@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1
+
+- Config files starting with a UTF-8 byte order mark (as written by PowerShell) are accepted
+- `abap_list_transports` also lists customizing requests and explains the owner filter when
+  the list is empty
+- `--call <tool> --args <json|@file|->` runs one tool from the command line without an MCP host
+- `abap_deploy_ui5_app` mentions a `.Ui5RepositoryIgnore` file in the archive (SAP stores fewer
+  files than uploaded); docs on building with the deployment configuration and on the
+  deploy-time vs build-time excludes
+
 ## 0.3.0
 
 - `abap_deploy_ui5_app`: deploy a built SAPUI5 / Fiori app (dist folder or zip) to the SAPUI5

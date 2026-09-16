@@ -43,7 +43,7 @@ registration and skill registration, follow the
 | Activate changes | `abap_activate` activates specified objects and returns the activation log. |
 | Inspect pending activation | `abap_inactive_objects` lists the current user's inactive objects and transports. |
 | Test behavior | `abap_run_unit_tests` runs ABAP Unit for the relevant object. |
-| Deploy a SAPUI5 / Fiori app | `abap_deploy_ui5_app` uploads a built app (dist folder or zip) to the SAPUI5 ABAP repository. Test mode by default. |
+| Deploy a SAPUI5 / Fiori app | `abap_deploy_ui5_app` uploads a built app (dist folder or zip) to the SAPUI5 ABAP repository. Test mode by default. A success answer may be HTTP 200, 201 or 204. |
 | Inspect a deployed SAPUI5 app | `abap_ui5_app_info` shows package, description, URL and file inventory of a BSP application. |
 
 ## Read, change and validate
@@ -87,13 +87,17 @@ registration and skill registration, follow the
 (SAML single sign-on, BAS-only destinations). It sends the same request to the same SAP
 service, with the server's session.
 
-1. Build the app first (`npm run build` or the project's build script); the tool uploads
-   the build result in `dist` and does not build. Never point `source` at the project or
-   `webapp` folder.
-2. Take `app.name`, `app.package`, `app.transport`, `app.description` and `exclude` from
-   `ui5-deploy.yaml` (or from the user) and pass them unchanged. Ask the user for the
-   transport when the file has none and the package is transportable; do not pick one
-   yourself and do not create one unless the user asked for it.
+1. Build the app first with the deployment configuration minus the deploy task
+   (`npx ui5 build --config ui5-deploy.yaml --exclude-task=deploy-to-abap`, or the
+   project's build script), so build-time excludes such as mock data apply. The tool
+   uploads the build result in `dist` and does not build. Never point `source` at the
+   project or `webapp` folder.
+2. Take `app.name`, `app.package`, `app.transport`, `app.description` and `exclude` (the
+   deploy task's list, not build-time resource excludes) from `ui5-deploy.yaml` (or from
+   the user) and pass them unchanged. Ask the user for the transport when the file has
+   none and the package is transportable; do not pick one yourself and do not create one
+   unless the user asked for it. `abap_list_transports` only shows requests the user owns
+   or has a task in; a request named by the user can be valid even when it is not listed.
 3. Run with the default `testMode: true` and show the user the SAP check log. Only after
    the log is clean (or the user accepts the warnings) call again with `testMode: false`.
 4. Report the SAP messages, the transport and the app URL from the result. Verify with
@@ -123,4 +127,6 @@ workflow above. A download request alone does not authorize remote changes.
 | TLS certificate-chain error | Use the corporate CA PEM through `caCert` / `SAP_CA_CERT` or `NODE_EXTRA_CA_CERTS`. Keep certificate verification enabled; do not fix this by enabling `allowSelfSigned`. Keep local `corp-ca.pem` out of version control. |
 | Authentication expires (401 or SAML HTML) | In SSO mode the server re-logs on and retries once. If it still fails, have the user complete logon and verify the connection. Static cookie/bearer credentials require renewal through the configured authentication mechanism. Before manually retrying a failed mutation, inspect source and transport state to see whether it took effect. |
 | Missing transport | The save tool reports that nothing was saved and lists candidate requests. Inspect transport info, select an appropriate request/task or create one within scope, then retry with `transport`. Do not move the object to a local package to bypass this requirement. |
+| `abap_list_transports` is empty but the user named a request | The list covers requests owned by, or with a task of, the configured user. Use the request the user named (check it with `abap_transport_info`), or list its owner's requests with the `user` parameter. |
+| Deployed file count is lower than uploaded | SAP skipped files matching `.Ui5RepositoryIgnore` in the archive; the deploy result mentions the file. Not an error. |
 | Read shows changes but runtime behavior is unchanged | Reads default to inactive source when present. Compare with `version: "active"`, inspect metadata or `abap_inactive_objects`, and activate the intended changes after fixing errors. Report an inactive draft accurately. |
