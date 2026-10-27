@@ -373,7 +373,6 @@ export class BrowserSsoProvider implements CookieProvider {
           ),
         remainingMs
       )
-      timer.unref?.()
     })
     return Promise.race([logon, gaveUp]).finally(() => clearTimeout(timer))
   }
