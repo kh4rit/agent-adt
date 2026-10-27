@@ -23,12 +23,12 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "abap-adt-api": "^8.4.3",
-    "zod": "^4.6.2"
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "abap-adt-api": "^8.5.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^24.13.4",
+    "@types/node": "^24.19.2",
     "typescript": "^5.9.3"
   },
   "bin": {
