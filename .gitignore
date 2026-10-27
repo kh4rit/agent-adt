@@ -6,3 +6,5 @@ abap-adt-mcp.json
 .env
 corp-ca.pem
 *.cookies.json
+webgui/sapgui.config.json
+webgui/img-tree.json

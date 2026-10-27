@@ -18,6 +18,8 @@ real SAP system:
 - **deploy built SAPUI5 / Fiori apps** to the SAPUI5 ABAP repository (BSP applications) through
   the same service `fiori deploy` uses, with the server's logon (works where the Fiori tools
   cannot log on, e.g. SAML single sign-on systems)
+- **customizing (SPRO / IMG activities)** through SAP GUI for HTML with the separate
+  [`webgui/sapgui.mjs`](webgui/README.md) driver and the [`spro`](skills/spro/SKILL.md) agent skill
 
 It is built on [`abap-adt-api`](https://github.com/marcellourbani/abap-adt-api), the ADT client
 library behind the [ABAP remote filesystem](https://github.com/marcellourbani/vscode_abap_remote_fs)
@@ -248,6 +250,16 @@ or add it to `.mcp.json` in the project:
 ```
 
 Cursor, Windsurf, Cline and other clients use the same `command` / `args` / `env` shape.
+
+## Customizing via SAP GUI for HTML (`webgui/`)
+
+ADT does not cover customizing. For SPRO / IMG activities the repository contains a second, independent
+tool: [`webgui/sapgui.mjs`](webgui/README.md) drives SAP GUI for HTML in a browser with remote debugging,
+addressing fields and buttons by their SAP GUI scripting IDs (no screenshots, no pixel clicks), navigates
+the IMG tree from a local cache, reads tables via ADT data preview and saves to the customizing request
+you give it. The [`spro`](skills/spro/SKILL.md) skill describes the workflow for agents; it is registered
+together with the other skills (`copilot skill add <repo>/skills`). Requires Node.js 22+. Setup:
+[webgui/README.md](webgui/README.md).
 
 ## Tools
 

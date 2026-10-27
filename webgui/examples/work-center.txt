@@ -1,0 +1,34 @@
+# EWM example: new work center with its own storage type and storage section.
+# Replace <WH> (warehouse), <TR> (customizing request), the templates (<ST_TEMPLATE>, <WC_TEMPLATE>) and the new keys.
+# Run: node webgui/sapgui.mjs run examples/work-center.txt
+
+# 1) storage type, copied from a work-center storage type, role E (Work Center)
+spro "Define Storage Types" tree="Extended Warehouse Management › Master Data"
+position <WH> <ST_TEMPLATE>
+selectkey LGNUM=<WH> LGTYP=<ST_TEMPLATE>
+press 6
+set LGTYP=DEMO "LTYPT=Demo work center" ST_ROLE=E
+press 0
+save <TR>
+leave
+
+# 2) storage section in the new storage type
+spro "Define Storage Sections" tree="Extended Warehouse Management › Master Data"
+press 5
+set "LGNUM[0]=<WH>" "LGTYP[0]=DEMO" "LGBER[0]=DEMO" "LBERT[0]=Demo work center"
+key Enter
+save <TR>
+leave
+
+# 3) work center, copied from a template, using the new storage type and section
+spro "Define Work Center" tree="Extended Warehouse Management"
+position <WH> <WC_TEMPLATE>
+selectkey LGNUM=<WH> WORKSTATION=<WC_TEMPLATE>
+press 6
+set WORKSTATION=DEMO "DESCRIPTION=Demo work center" LGTYP=DEMO I_SECTION=DEMO
+press 0
+save <TR>
+leave
+
+# verify
+sql SELECT lgnum, workstation, lgtyp, i_section FROM /scwm/tworkst WHERE lgnum = '<WH>' AND workstation = 'DEMO'
