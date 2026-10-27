@@ -286,3 +286,16 @@ export const dataPreview = (rows: { TRKORR: string; AS4TEXT: string }[]) => `<?x
     <dataPreview:dataSet>${rows.map(r => `<dataPreview:data>${r.AS4TEXT}</dataPreview:data>`).join("")}</dataPreview:dataSet>
   </dataPreview:columns>
 </dataPreview:tableData>`
+
+export const DTEL_URL = "/sap/bc/adt/ddic/dataelements/zdemo_pallet_no"
+
+/** Data element document as SAP returns it (dataelements.v2). */
+export const dataElementXml = `<?xml version="1.0" encoding="utf-8"?><blue:wbobj adtcore:responsible="DEVELOPER" adtcore:masterLanguage="EN" adtcore:masterSystem="NPL" adtcore:name="ZDEMO_PALLET_NO" adtcore:type="DTEL/DE" adtcore:changedAt="2026-02-06T06:57:22Z" adtcore:version="active" adtcore:createdAt="2026-02-05T23:00:00Z" adtcore:changedBy="DEVELOPER" adtcore:createdBy="DEVELOPER" adtcore:description="Pallet number" adtcore:language="EN" xmlns:blue="http://www.sap.com/wbobj/dictionary/dtel" ${ADTCORE}><atom:link href="versions" rel="http://www.sap.com/adt/relations/versions" xmlns:atom="http://www.w3.org/2005/Atom"/><adtcore:packageRef adtcore:uri="/sap/bc/adt/packages/zdemo" adtcore:type="DEVC/K" adtcore:name="ZDEMO"/><dtel:dataElement xmlns:dtel="http://www.sap.com/adt/dictionary/dataelements"><dtel:typeKind>domain</dtel:typeKind><dtel:typeName>ZDEMO_PALLET_NO</dtel:typeName><dtel:dataType>CHAR</dtel:dataType><dtel:dataTypeLength>000003</dtel:dataTypeLength><dtel:shortFieldLabel>Pallet No.</dtel:shortFieldLabel><dtel:shortFieldLength>10</dtel:shortFieldLength></dtel:dataElement></blue:wbobj>`
+
+export const FM_URL = "/sap/bc/adt/functions/groups/zdemo_fg/fmodules/z_demo_post"
+
+/** Function module metadata (fmodules.v3) of a remote-enabled module. */
+export const functionModuleXml = `<?xml version="1.0" encoding="utf-8"?><fmodule:abapFunctionModule fmodule:releaseState="notReleased" fmodule:processingType="rfc" fmodule:rfcScope="notClassified" fmodule:rfcVersion="any" abapsource:sourceUri="source/main" adtcore:name="Z_DEMO_POST" adtcore:type="FUGR/FF" adtcore:changedAt="2026-09-02T13:33:55Z" adtcore:version="active" adtcore:createdAt="2026-09-01T00:00:00Z" adtcore:changedBy="DEVELOPER" adtcore:description="Post demo data" adtcore:descriptionTextLimit="74" adtcore:language="EN" xmlns:fmodule="http://www.sap.com/adt/functions/fmodules" xmlns:abapsource="http://www.sap.com/adt/abapsource" ${ADTCORE}><atom:link href="source/main" rel="http://www.sap.com/adt/relations/source" type="text/plain" xmlns:atom="http://www.w3.org/2005/Atom"/><adtcore:containerRef adtcore:uri="/sap/bc/adt/functions/groups/zdemo_fg" adtcore:type="FUGR/F" adtcore:name="ZDEMO_FG" adtcore:packageName="ZDEMO"/></fmodule:abapFunctionModule>`
+
+/** The demo class once its test include exists (classStructure without the testclasses include otherwise). */
+export const classStructureWithoutTests = classStructure.replace(/<class:include class:includeType="testclasses"[\s\S]*?<\/class:include>/, "")

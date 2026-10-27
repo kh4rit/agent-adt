@@ -234,7 +234,8 @@ export async function resolveObject(system: AbapSystem, spec: ObjectSpec): Promi
     const url = map.get(include)
     if (!url)
       throw new ObjectNotFoundError(
-        `Class ${name} has no ${include} include. Available: ${[...map.keys()].join(", ")}`
+        `Class ${name} has no ${include} include. Available: ${[...map.keys()].join(", ")}` +
+          (include === "testclasses" ? ". abap_write_source with include testclasses creates it." : "")
       )
     sourceUrl = url
     version = includes.find(i => i.type === include)?.version ?? version

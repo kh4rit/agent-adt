@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0
+
+- Domains and data elements: `abap_write_source` / `abap_edit_source` save their XML definition
+  (as read with `abap_read_source`) in the format SAP returned, without the read-only links
+- `abap_write_source` with `include: "testclasses"` creates the missing test class include of
+  a class (classes created by `abap_create_object` have none)
+- `abap_set_processing_type` and `processingType` / `updateTaskKind` on `abap_create_object`:
+  normal, remote-enabled or update function modules
+- `abap_lock_status`: can the object be edited now, or which user holds the lock
+- Large sources: `abap_read_source` with `method` (one class method), `saveTo` (download to a
+  file) and a "continue with startLine" hint on partial reads; `abap_write_source` with
+  `sourceFile`
+- Docs: the server does not run ABAP code and cannot release other sessions' locks, on purpose
+
 ## 0.4.1
 
 - Tool calls of a system run one after the other when reads and writes share one SAP session

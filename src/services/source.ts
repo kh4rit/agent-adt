@@ -1,6 +1,6 @@
 import type { classIncludes, Revision, SyntaxCheckResult } from "abap-adt-api"
 import type { AbapSystem } from "../connection.js"
-import { label, type ResolvedObject } from "../objects.js"
+import { label, resolveObject, type ResolvedObject } from "../objects.js"
 import { errorMessage, numbered, plural } from "../format.js"
 import { transportForLockedObject } from "./transports.js"
 import { activateObject, formatActivation, type ActivationSummary } from "./activation.js"
@@ -30,7 +30,60 @@ export async function readSource(system: AbapSystem, obj: ResolvedObject, option
   const slice = lines.slice(start - 1, end).join("\n")
   const header = `${label(obj)} [${version}]` + (start > 1 || end < lines.length ? ` lines ${start}-${end} of ${lines.length}` : ` ${plural(lines.length, "line")}`)
   const body = options.lineNumbers ? numbered(slice, start) : slice
-  return { source, version, totalLines: lines.length, text: `${header}\n${body}` }
+  const more = end < lines.length ? `\n... ${plural(lines.length - end, "more line")}: continue with startLine=${end + 1}` : ""
+  return { source, version, totalLines: lines.length, text: `${header}\n${body}${more}` }
+}
+
+/** Line range of METHOD name ... ENDMETHOD in a class source, 1-based; undefined when absent. */
+export function findMethod(source: string, method: string): { start: number; end: number } | undefined {
+  const lines = source.split(/\r?\n/)
+  const name = method.trim().toLowerCase()
+  const opens = (l: string) => {
+    const m = l.match(/^\s*method\s+([\w~\/]+)(?=[\s.])/i)
+    return !!m && m[1].toLowerCase() === name
+  }
+  const start = lines.findIndex(opens)
+  if (start < 0) return undefined
+  const end = lines.findIndex((l, i) => i > start && /^\s*endmethod\s*\./i.test(l))
+  return { start: start + 1, end: end < 0 ? lines.length : end + 1 }
+}
+
+/** Reads one method implementation of a class include, with its line numbers in the include. */
+export async function readMethod(system: AbapSystem, obj: ResolvedObject, method: string, options: ReadOptions = {}): Promise<string> {
+  if (!obj.isClass) throw new Error(`${label(obj)} is not a class: the method parameter only applies to classes`)
+  const full = await readSource(system, obj, { version: options.version })
+  const range = findMethod(full.source, method)
+  if (!range) {
+    const names = [...full.source.matchAll(/^\s*method\s+([\w~\/]+)/gim)].map(m => m[1])
+    throw new Error(`No METHOD ${method} in ${label(obj)} [${full.version}]. Implemented methods: ${names.join(", ") || "(none)"}`)
+  }
+  const r = await readSource(system, obj, { ...options, version: full.version, startLine: range.start, endLine: range.end, lineNumbers: options.lineNumbers ?? true })
+  return r.text.replace(/\n\.\.\. \d+ more lines?: continue with startLine=\d+$/, "")
+}
+
+/** Object types whose definition is an XML document that can be written back (no ABAP source). */
+export const XML_DEFINITION_TYPES = ["DOMA/DD", "DTEL/DE"]
+
+/** Removes read-only parts of an ADT document before it is sent back. */
+export const stripReadOnlyParts = (xml: string) => xml.replace(/\s*<atom:link\b[^>]*?(\/>|>[\s\S]*?<\/atom:link>)/g, "")
+
+/** Saves the XML definition of a domain or data element (as returned by abap_read_source). */
+async function writeDefinition(system: AbapSystem, obj: ResolvedObject, xml: string, requested?: string) {
+  const doc = stripReadOnlyParts(xml.replace(/^\uFEFF/, "").trim())
+  const root = doc.match(/<(?!\?)[\w:]+\b[^>]*>/)?.[0] ?? ""
+  const name = root.match(/adtcore:name="([^"]*)"/)?.[1]
+  if (!name) throw new Error(`The XML has no adtcore:name on its root element: pass the complete document as read with abap_read_source`)
+  if (name.toUpperCase() !== obj.name.toUpperCase()) throw new Error(`The XML describes ${name}, not ${obj.name}; nothing was saved`)
+  // send the document in the format SAP returned it in
+  const current = await system.reader.httpClient.request(obj.objectUrl, { headers: { Accept: "application/*" } })
+  const contentType = `${current.headers?.["content-type"] ?? "application/xml"}`.split(";")[0].trim()
+  return system.withLock(obj.lockUrl, async (lock, client) => {
+    const choice = await transportForLockedObject(client, obj, lock, requested)
+    const qs: Record<string, string> = { lockHandle: lock.LOCK_HANDLE }
+    if (choice.transport) qs.corrNr = choice.transport
+    await client.httpClient.request(obj.objectUrl, { method: "PUT", body: doc, qs, headers: { "Content-Type": contentType, Accept: contentType } })
+    return choice
+  })
 }
 
 /** Number of a stored version ("00001") from its content URI. */
@@ -152,18 +205,22 @@ export async function writeSource(
   options: WriteOptions = {}
 ): Promise<WriteResult> {
   system.assertWritable("saving source code")
-  if (!obj.hasSource) throw new Error(`${label(obj)} has no ABAP source that can be written with this tool`)
+  const definition = !obj.hasSource && XML_DEFINITION_TYPES.includes(obj.type)
+  if (!obj.hasSource && !definition)
+    throw new Error(`${label(obj)} has no ABAP source that can be written with this tool (XML definitions can be written for ${XML_DEFINITION_TYPES.join(", ")})`)
   const normalized = source.replace(/\r\n/g, "\n")
-  const { transport, note } = await system.withLock(obj.lockUrl, async (lock, client) => {
-    const choice = await transportForLockedObject(client, obj, lock, options.transport)
-    await client.setObjectSource(obj.sourceUrl, normalized, lock.LOCK_HANDLE, choice.transport)
-    return choice
-  })
+  const { transport, note } = definition
+    ? await writeDefinition(system, obj, normalized, options.transport)
+    : await system.withLock(obj.lockUrl, async (lock, client) => {
+        const choice = await transportForLockedObject(client, obj, lock, options.transport)
+        await client.setObjectSource(obj.sourceUrl, normalized, lock.LOCK_HANDLE, choice.transport)
+        return choice
+      })
   // from here on the source is saved: later failures must not hide that
   const out: string[] = [`Saved ${label(obj)} (inactive version)${transport ? ` in transport ${transport}` : ""}${note ? ` - ${note}` : ""}.`]
   out.push(...system.takeUnlockProblems())
   const result: WriteResult = { transport, transportNote: note, text: "" }
-  if (options.checkSyntax !== false) {
+  if (options.checkSyntax !== false && !definition) {
     try {
       result.syntax = await syntaxCheck(system, obj, normalized)
       out.push(formatSyntax(result.syntax, obj))
@@ -184,4 +241,20 @@ export async function writeSource(
   } else out.push("The object is saved but inactive. Call abap_activate to activate it.")
   result.text = out.join("\n")
   return result
+}
+
+/**
+ * Creates the local test class include of a class (abap_create_object creates classes without
+ * one), recorded in the class's transport, and returns the class resolved to that include.
+ */
+export async function createTestInclude(system: AbapSystem, cls: ResolvedObject, requested?: string): Promise<{ obj: ResolvedObject; transport: string }> {
+  system.assertWritable("creating the test class include")
+  if (!cls.isClass) throw new Error(`${label(cls)} is not a class`)
+  const { transport } = await system.withLock(cls.lockUrl, async (lock, client) => {
+    const choice = await transportForLockedObject(client, cls, lock, requested)
+    await client.createTestInclude(cls.name, lock.LOCK_HANDLE, choice.transport)
+    return choice
+  })
+  const obj = await resolveObject(system, { uri: cls.objectUrl, include: "testclasses" })
+  return { obj, transport }
 }

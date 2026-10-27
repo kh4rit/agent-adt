@@ -24,6 +24,8 @@ const EXPECTED_TOOLS = [
   "abap_list_versions",
   "abap_sql_query",
   "abap_odata_metadata",
+  "abap_set_processing_type",
+  "abap_lock_status",
   "abap_create_object",
   "abap_find_usages",
   "abap_package_contents",

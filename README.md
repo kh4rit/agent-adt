@@ -272,9 +272,9 @@ together with the other skills (`copilot skill add <repo>/skills`). Requires Nod
 | `abap_list_systems` | Configured systems and which one is the default |
 | `abap_search_objects` | Repository search by name pattern (`ZCL_INV*`, `*PRICING*`), optional type filter |
 | `abap_get_object` | Metadata: type, package, active/inactive, last change, includes, main program |
-| `abap_read_source` | Source code (inactive version if one exists), optional line range and line numbers |
-| `abap_write_source` | Replace the full source: lock, save to transport, unlock, syntax check, optional activate |
-| `abap_edit_source` | Search-and-replace edits on the current source, then the same save flow |
+| `abap_read_source` | Source code (inactive version if one exists), optional line range, line numbers, one class `method`, a stored `revision`, or `saveTo` a local file |
+| `abap_write_source` | Replace the full source (or `sourceFile`): lock, save to transport, unlock, syntax check, optional activate. Domains and data elements take their XML definition; a missing class test include is created |
+| `abap_edit_source` | Search-and-replace edits on the current source (or DOMA/DTEL XML), then the same save flow; `occurrence` picks one of several matches |
 | `abap_syntax_check` | Syntax check of given (unsaved) or current source |
 | `abap_activate` | Activate objects (or all inactive objects of the user) and return the activation log |
 | `abap_inactive_objects` | Inactive objects of the user with their transports |
@@ -287,6 +287,8 @@ together with the other skills (`copilot skill add <repo>/skills`). Requires Nod
 | `abap_package_contents` | Objects of a package grouped by type |
 | `abap_object_outline` | Methods, attributes, events of a class or interface |
 | `abap_run_unit_tests` | Run ABAP Unit and report failures |
+| `abap_set_processing_type` | Function module processing type: normal, rfc or update (with update task kind); also a parameter of `abap_create_object` |
+| `abap_lock_status` | Whether an object can be edited now, or which user holds its edit lock |
 | `abap_list_versions` | Stored versions of an object (version management); `abap_read_source` with `revision` reads one |
 | `abap_sql_query` | Read-only ABAP SQL `SELECT` through ADT data preview (Eclipse's SQL console), rows as a table |
 | `abap_odata_metadata` | `$metadata` of a Gateway OData V2/V4 service with the server's logon: summary, raw XML, or saved to a file |
@@ -369,6 +371,10 @@ from a different `sap.app/id` is only overwritten with `safeMode: false`. Adapta
   with the user's authorizations; `allowSql: false` / `SAP_ALLOW_SQL=false` switches it off for
   systems whose data must not reach the agent.
 - The server never deletes objects and never releases transports.
+- It does not run ABAP code (no console application runs) and cannot release edit locks of
+  other sessions: ADT only unlocks with the handle of the session that locked. A lock of the
+  server's own user ends with its SAP session; others are deleted by the user in SM12.
+  `abap_run_unit_tests` is for tests, not for running code against business data.
 - Passwords: use `${input:...}` prompts in VS Code or `${env:...}` placeholders in the config
   file instead of plain text.
 - Everything the agent saves is an inactive version until it explicitly activates it.

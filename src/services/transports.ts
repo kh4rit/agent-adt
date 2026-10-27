@@ -20,7 +20,7 @@ export function candidates(info: TransportInfo, user?: string): string {
  */
 export async function transportForLockedObject(
   client: ADTClient,
-  obj: ResolvedObject,
+  obj: Pick<ResolvedObject, "sourceUrl" | "type" | "name">,
   lock: AdtLock,
   requested?: string
 ): Promise<{ transport: string; note?: string }> {

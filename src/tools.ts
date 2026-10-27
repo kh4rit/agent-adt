@@ -1,14 +1,17 @@
 import { z } from "zod"
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import type { Systems } from "./connection.js"
-import { CLASS_INCLUDES, label, packageOf, resolveObject, type ObjectSpec } from "./objects.js"
+import { CLASS_INCLUDES, label, ObjectNotFoundError, packageOf, resolveObject, type ObjectSpec } from "./objects.js"
 import { errorMessage, plural, truncate } from "./format.js"
-import { applyEdits, formatRevisions, formatSyntax, listRevisions, readRevision, readSource, syntaxCheck, writeSource } from "./services/source.js"
+import { applyEdits, createTestInclude, formatRevisions, formatSyntax, listRevisions, readMethod, readRevision, readSource, syntaxCheck, writeSource } from "./services/source.js"
+import { lockStatus } from "./services/locks.js"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { dirname, resolve as resolvePath } from "node:path"
 import { activateInactive, activateObject, activateTogether, formatActivation, formatInactive, inactiveObjects } from "./services/activation.js"
 import { createTransportFor, describeTransportInfo, listTransports, readTransport } from "./services/transports.js"
 import { runSqlQuery, SQL_MAX_ROWS } from "./services/data.js"
 import { odataMetadata } from "./services/odata.js"
-import { createObject, supportedCreateTypes } from "./services/create.js"
+import { createObject, PROCESSING_TYPES, setProcessingType, supportedCreateTypes, UPDATE_TASK_KINDS } from "./services/create.js"
 import { findUsages, outline, packageContents, runUnitTests } from "./services/navigation.js"
 import { deployUi5App, ui5AppInfo } from "./services/ui5.js"
 
@@ -167,11 +170,13 @@ export function registerTools(mcp: McpServer, systems: Systems) {
     {
       title: "Read source code",
       description:
-        "Reads the source code of an object (class, interface, program, include, function module, CDS view ...). Returns the inactive version when unsaved changes exist, otherwise the active one. For objects without ABAP source (tables, data elements) the XML definition is returned. Use startLine/endLine on big objects. Pass `revision` to read a stored older version (see abap_list_versions).",
+        "Reads the source code of an object (class, interface, program, include, function module, CDS view ...). Returns the inactive version when unsaved changes exist, otherwise the active one. For objects without ABAP source (tables, data elements) the XML definition is returned. Use startLine/endLine on big objects. Pass `revision` to read a stored older version (see abap_list_versions), `method` to read one method of a class, `saveTo` to write the source to a local file instead of returning it.",
       inputSchema: {
         ...objectParams,
         version: z.enum(["active", "inactive"]).optional().describe("Force the active or the inactive version."),
         revision: z.string().optional().describe("Stored version to read instead of the current source: its number from abap_list_versions (e.g. 00001) or its uri."),
+        method: z.string().optional().describe("Classes only: return just this method implementation (METHOD ... ENDMETHOD) with its line numbers, e.g. get_data or if_foo~bar."),
+        saveTo: z.string().optional().describe("Local file path: write the complete source there (directories are created) and return only a summary. Use for large sources and downloads."),
         startLine: z.number().int().min(1).optional().describe("First line to return (1-based)."),
         endLine: z.number().int().min(1).optional().describe("Last line to return."),
         lineNumbers: z.boolean().optional().describe("Prefix every line with its line number (default false).")
@@ -182,6 +187,14 @@ export function registerTools(mcp: McpServer, systems: Systems) {
       run(async () => {
         const system = systems.get(args.system)
         const obj = await resolveObject(system, spec(args))
+        if (args.saveTo) {
+          const r = await readSource(system, obj, { version: args.version })
+          const file = resolvePath(args.saveTo)
+          mkdirSync(dirname(file), { recursive: true })
+          writeFileSync(file, r.source)
+          return `${label(obj)} [${r.version}] ${plural(r.totalLines, "line")} saved to ${file}`
+        }
+        if (args.method) return readMethod(system, obj, args.method, { version: args.version, lineNumbers: args.lineNumbers })
         if (args.revision)
           return readRevision(system, obj, args.revision, { startLine: args.startLine, endLine: args.endLine, lineNumbers: args.lineNumbers })
         const r = await readSource(system, obj, {
@@ -199,10 +212,11 @@ export function registerTools(mcp: McpServer, systems: Systems) {
     {
       title: "Write source code",
       description:
-        "Replaces the complete source of an existing object: locks it, saves the new source as inactive version (recorded in a transport request when the package is transportable), unlocks it and runs a syntax check. Set activate=true to activate right away. For small changes prefer abap_edit_source. Transportable objects need `transport` unless they are already recorded in one of your requests.",
+        "Replaces the complete source of an existing object: locks it, saves the new source as inactive version (recorded in a transport request when the package is transportable), unlocks it and runs a syntax check. Set activate=true to activate right away. For small changes prefer abap_edit_source. Transportable objects need `transport` unless they are already recorded in one of your requests. Domains (DOMA) and data elements (DTEL) take their complete XML definition as read with abap_read_source. Writing the testclasses include of a class that has none creates it.",
       inputSchema: {
         ...objectParams,
-        source: z.string().describe("The complete new source code of the object / include."),
+        source: z.string().optional().describe("The complete new source code of the object / include (or XML definition for DOMA / DTEL)."),
+        sourceFile: z.string().optional().describe("Local file with the complete new source, instead of source: keeps large sources out of the tool call."),
         transport: z.string().optional().describe("Transport request or task number, e.g. DEVK900123. Required for transportable objects that are not yet locked in a request."),
         activate: z.boolean().optional().describe("Activate after saving (default false)."),
         checkSyntax: z.boolean().optional().describe("Run a syntax check after saving (default true).")
@@ -212,9 +226,21 @@ export function registerTools(mcp: McpServer, systems: Systems) {
     args =>
       run(async () => {
         const system = systems.get(args.system)
-        const obj = await resolveObject(system, spec(args))
-        const r = await writeSource(system, obj, args.source, { transport: args.transport, activate: args.activate, checkSyntax: args.checkSyntax })
-        return r.text
+        if ((args.source === undefined) === !args.sourceFile) throw new Error("Pass either source or sourceFile")
+        const source = args.source ?? readFileSync(resolvePath(args.sourceFile!), "utf8").replace(/^\uFEFF/, "")
+        let created = ""
+        let obj
+        try {
+          obj = await resolveObject(system, spec(args))
+        } catch (e) {
+          if (!(e instanceof ObjectNotFoundError && args.include === "testclasses" && /has no testclasses include/.test(e.message))) throw e
+          const cls = await resolveObject(system, { ...spec(args), include: "main" })
+          const r = await createTestInclude(system, cls, args.transport)
+          obj = r.obj
+          created = `Created the test class include of ${cls.name}${r.transport ? ` in transport ${r.transport}` : ""}.\n`
+        }
+        const r = await writeSource(system, obj, source, { transport: args.transport, activate: args.activate, checkSyntax: args.checkSyntax })
+        return created + r.text
       })
   )
 
@@ -421,6 +447,8 @@ export function registerTools(mcp: McpServer, systems: Systems) {
         softwareComponent: z.string().optional().describe("DEVC/K only: software component; default the super package's (LOCAL for $ packages)."),
         transportLayer: z.string().optional().describe("DEVC/K only: transport layer; default the super package's."),
         packageType: z.enum(["development", "structure", "main"]).optional().describe("DEVC/K only: package type, default development."),
+        processingType: z.enum(PROCESSING_TYPES).optional().describe("FUGR/FF only: normal (default), rfc (remote-enabled) or update (update module)."),
+        updateTaskKind: z.enum(UPDATE_TASK_KINDS).optional().describe("FUGR/FF update modules only: startImmediate (V1, default), startDelayed (V2), immediateStartNoRestart, collectiveRun."),
         system: systemParam
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
@@ -556,6 +584,45 @@ export function registerTools(mcp: McpServer, systems: Systems) {
       run(async () => {
         const system = systems.get(args.system)
         return odataMetadata(system, args)
+      })
+  )
+
+  server.registerTool(
+    "abap_set_processing_type",
+    {
+      title: "Set function module processing type",
+      description:
+        "Changes the processing type of an existing function module: normal, rfc (remote-enabled) or update (update module, with updateTaskKind). Saved inactive in the function module's transport; activate afterwards.",
+      inputSchema: {
+        ...objectParams,
+        processingType: z.enum(PROCESSING_TYPES).describe("normal, rfc or update."),
+        updateTaskKind: z.enum(UPDATE_TASK_KINDS).optional().describe("For update: startImmediate (V1, default), startDelayed (V2), immediateStartNoRestart, collectiveRun."),
+        transport: z.string().optional().describe("Transport request, required when the function module is not yet recorded in one.")
+      },
+      annotations: writes
+    },
+    args =>
+      run(async () => {
+        const system = systems.get(args.system)
+        const obj = await resolveObject(system, { ...spec(args), type: args.type ?? (args.uri ? undefined : "FUNC") })
+        return (await setProcessingType(system, obj, args.processingType, args.updateTaskKind, args.transport)).text
+      })
+  )
+
+  server.registerTool(
+    "abap_lock_status",
+    {
+      title: "Edit lock status",
+      description:
+        "Tells whether an object can be edited now or who holds its edit lock (e.g. after \"currently editing\" errors), by locking it and releasing it at once. ADT cannot release locks of other sessions; a lock of the tool's own user ends with its SAP session, otherwise the user deletes it in SM12.",
+      inputSchema: objectParams,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+    },
+    args =>
+      run(async () => {
+        const system = systems.get(args.system)
+        const obj = await resolveObject(system, spec(args))
+        return lockStatus(system, obj)
       })
   )
 

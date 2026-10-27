@@ -36,7 +36,9 @@ registration and skill registration, follow the
   the order of changes and their results hard to follow.
 - Unit tests are for testing. Never use `abap_run_unit_tests` (or test classes
   with `RISK LEVEL DANGEROUS`) to run code that reads or changes business data,
-  calls function modules for their effect, or works around a missing tool.
+  calls function modules for their effect, or works around a missing tool. The
+  tools deliberately cannot run ABAP code; read data with `abap_sql_query`, and
+  ask the user to run reports or transactions themselves.
 - Never delete lock (enqueue) entries from ABAP (`ENQUE_DELETE` and similar).
   A lock of the tool's own user is released when its SAP session ends; otherwise
   the user deletes it in SM12.
@@ -52,11 +54,14 @@ registration and skill registration, follow the
 | Find objects | `abap_search_objects` searches name patterns such as `ZCL_INV*`; filter by type when needed. It is not a full-text source search. |
 | Inspect metadata | `abap_get_object` returns package, version, source URI, class includes and main program. |
 | Browse a package | `abap_package_contents` lists objects grouped by type with ADT URIs. |
-| Read or download source | `abap_read_source` reads source or a DDIC XML definition; use line ranges for inspection and full source for downloads. |
+| Read or download source | `abap_read_source` reads source or a DDIC XML definition. Use `method` for one method of a class, line ranges for inspection (the result says where to continue), and `saveTo` to download large sources to a file instead of into the conversation. |
 | Inspect class structure | `abap_object_outline` shows methods, attributes and events. |
 | Find dependencies | `abap_find_usages` finds uses of an object or a symbol at a source position. |
 | Make a focused edit | `abap_edit_source` applies exact replacements; `edits` is an array of `{oldText, newText}`. Each `oldText` must occur exactly once, or pass `occurrence` to pick one. |
-| Replace full source | `abap_write_source` replaces the complete object or selected include, then checks syntax by default. |
+| Replace full source | `abap_write_source` replaces the complete object or selected include, then checks syntax by default. Pass large sources as `sourceFile` (a local file) instead of `source`. Writing `include: "testclasses"` of a class without test include creates it. |
+| Change a domain or data element | Read its XML with `abap_read_source`, then change it with `abap_edit_source` (or write the complete XML back with `abap_write_source`). |
+| Function module processing type | `abap_set_processing_type` (normal, rfc, update with update task kind), or `processingType` when creating it. |
+| Edit lock in doubt | `abap_lock_status` tells whether the object can be edited now or who holds the lock. |
 | Check syntax | `abap_syntax_check` checks current source or a supplied unsaved candidate. |
 | Inspect transport requirements | `abap_transport_info` reports the existing request lock and candidate transports. |
 | Find a transport | `abap_list_transports` lists modifiable workbench and customizing requests the user owns or has a task in (no wildcards). |

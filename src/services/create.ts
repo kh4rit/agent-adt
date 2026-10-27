@@ -1,8 +1,8 @@
 import { CreatableTypes, objectPath } from "abap-adt-api"
 import type { CreatableTypeIds, NewObjectOptions, PackageTypes, ValidateOptions } from "abap-adt-api"
 import type { AbapSystem } from "../connection.js"
-import { normalizeType } from "../objects.js"
-import { candidates, TransportRequiredError } from "./transports.js"
+import { normalizeType, type ResolvedObject } from "../objects.js"
+import { candidates, transportForLockedObject, TransportRequiredError } from "./transports.js"
 
 export interface CreateOptions {
   type: string
@@ -19,6 +19,10 @@ export interface CreateOptions {
   transportLayer?: string
   /** DEVC/K only: development (default), structure or main */
   packageType?: PackageTypes
+  /** FUGR/FF only: normal (default), rfc or update */
+  processingType?: ProcessingType
+  /** FUGR/FF update modules only */
+  updateTaskKind?: UpdateTaskKind
 }
 
 export interface CreateResult {
@@ -72,9 +76,18 @@ export async function createObject(system: AbapSystem, o: CreateOptions): Promis
   await system.reader.validateNewObject(validation)
 
   const transport = await transportForNew(system, uri, pkg, o.transport)
+  if ((o.processingType || o.updateTaskKind) && objtype !== "FUGR/FF") throw new Error("processingType and updateTaskKind only apply to function modules (FUGR/FF)")
   const options: NewObjectOptions = { objtype, name, parentName, description: o.description, parentPath, transport, responsible: system.user }
   await system.exclusive(() => system.retryOnCsrf(() => system.client.createObject(options)))
-  const text = `Created ${objtype} ${name} in package ${pkg}${transport ? ` (transport ${transport})` : ""}.\nURI: ${uri}\nThe object is an empty, inactive skeleton: read it with abap_read_source, then write the full source with abap_write_source and activate.`
+  let text = `Created ${objtype} ${name} in package ${pkg}${transport ? ` (transport ${transport})` : ""}.\nURI: ${uri}\nThe object is an empty, inactive skeleton: read it with abap_read_source, then write the full source with abap_write_source and activate.`
+  if (o.processingType && o.processingType !== "normal") {
+    try {
+      const fm = { objectUrl: uri, lockUrl: uri, type: objtype, name, sourceUrl: `${uri}/source/main` }
+      text += `\n${(await setProcessingType(system, fm, o.processingType, o.updateTaskKind, transport)).text}`
+    } catch (e) {
+      text += `\nThe function module was created, but its processing type could not be set: ${(e as Error).message}. Set it with abap_set_processing_type.`
+    }
+  }
   return { uri, transport, text }
 }
 
@@ -172,4 +185,56 @@ async function createPackage(system: AbapSystem, o: CreateOptions): Promise<Crea
     `Created package ${name}${superPackage ? ` in super package ${superPackage}` : ""} (${packageType}, software component ${softwareComponent}` +
     `${transportLayer ? `, transport layer ${transportLayer}` : ""})${transport ? `, transport ${transport}` : ""}.\nURI: ${uri}`
   return { uri, transport, text }
+}
+
+export const PROCESSING_TYPES = ["normal", "rfc", "update"] as const
+export type ProcessingType = (typeof PROCESSING_TYPES)[number]
+/** fmodule:updateTaskKind values (V1, V2, V1 without restart, collective run) */
+export const UPDATE_TASK_KINDS = ["startImmediate", "startDelayed", "immediateStartNoRestart", "collectiveRun"] as const
+export type UpdateTaskKind = (typeof UPDATE_TASK_KINDS)[number]
+
+const setAttribute = (tag: string, name: string, value?: string) => {
+  const without = tag.replace(new RegExp(`\\s${name}="[^"]*"`), "")
+  return value === undefined ? without : without.replace(/^(<[\w:]+)/, `$1 ${name}="${value}"`)
+}
+
+/**
+ * Changes the processing type of a function module (normal, remote-enabled, update module)
+ * through its ADT metadata document, as the properties view of Eclipse does. Read-only parts
+ * of the document (atom links) are not sent back, SAP rejects them.
+ */
+export async function setProcessingType(
+  system: AbapSystem,
+  fm: Pick<ResolvedObject, "objectUrl" | "lockUrl" | "type" | "name" | "sourceUrl">,
+  processingType: ProcessingType,
+  updateTaskKind?: UpdateTaskKind,
+  requested?: string
+): Promise<{ transport: string; text: string }> {
+  system.assertWritable("changing a function module")
+  if (fm.type !== "FUGR/FF") throw new Error(`${fm.type} ${fm.name} is not a function module`)
+  if (updateTaskKind && processingType !== "update") throw new Error("updateTaskKind only applies to processingType update")
+  const current = await system.reader.httpClient.request(fm.objectUrl, { headers: { Accept: "application/vnd.sap.adt.functions.fmodules.v3+xml, application/*" } })
+  const xml = String(current.body ?? "")
+  const contentType = `${current.headers?.["content-type"] ?? "application/vnd.sap.adt.functions.fmodules.v3+xml"}`.split(";")[0].trim()
+  const rootMatch = xml.match(/<fmodule:abapFunctionModule\b[^>]*>/)
+  if (!rootMatch) throw new Error(`SAP returned no function module metadata for ${fm.name}`)
+  let root = setAttribute(rootMatch[0], "fmodule:processingType", processingType)
+  root = setAttribute(root, "fmodule:updateTaskKind", processingType === "update" ? (updateTaskKind ?? xml.match(/fmodule:updateTaskKind="([^"]*)"/)?.[1] ?? "startImmediate") : undefined)
+  if (processingType !== "rfc") {
+    root = setAttribute(root, "fmodule:rfcScope", undefined)
+    root = setAttribute(root, "fmodule:rfcVersion", undefined)
+  }
+  const body = xml.replace(rootMatch[0], root).replace(/\s*<atom:link\b[^>]*?(\/>|>[\s\S]*?<\/atom:link>)/g, "")
+  const { transport } = await system.withLock(fm.lockUrl, async (lock, client) => {
+    const choice = await transportForLockedObject(client, fm, lock, requested)
+    const qs: Record<string, string> = { lockHandle: lock.LOCK_HANDLE }
+    if (choice.transport) qs.corrNr = choice.transport
+    await client.httpClient.request(fm.objectUrl, { method: "PUT", body, qs, headers: { "Content-Type": contentType, Accept: contentType } })
+    return choice
+  })
+  const kind = processingType === "update" ? ` (${root.match(/fmodule:updateTaskKind="([^"]*)"/)?.[1]})` : ""
+  return {
+    transport,
+    text: `Set the processing type of FUGR/FF ${fm.name} to ${processingType}${kind}${transport ? ` in transport ${transport}` : ""}. The change is inactive until the function module is activated.`
+  }
 }
