@@ -32,7 +32,9 @@ export function createServer(config: Config, factory?: (c: SystemConfig) => Abap
  * client, the tool is invoked and its text content returned.
  */
 export async function callTool(config: Config, name: string, args: Record<string, unknown>, factory?: (c: SystemConfig) => AbapSystem): Promise<{ text: string; isError: boolean }> {
-  const { server } = createServer(config, factory)
+  const { server, systems } = createServer(config, factory)
+  // no host timeout on the command line: wait for interactive logons to finish
+  for (const s of systems.list()) if (s.sso) s.sso.waitSeconds = undefined
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   await server.connect(serverTransport)
   const client = new Client({ name: "abap-adt-mcp-cli", version: SERVER_VERSION })

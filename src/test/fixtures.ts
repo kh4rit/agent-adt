@@ -77,13 +77,20 @@ export const lockResult = (corrnr = "", isLocal = "") => `<?xml version="1.0" en
 <IS_LOCAL>${isLocal}</IS_LOCAL><IS_LINK_UP/><MODIFICATION_SUPPORT>ABAP</MODIFICATION_SUPPORT>
 </DATA></asx:values></asx:abap>`
 
-const request = (trkorr: string, text: string) => `<CTS_REQUEST><REQ_HEADER><TRKORR>${trkorr}</TRKORR><TRFUNCTION>K</TRFUNCTION><TRSTATUS>D</TRSTATUS><TARSYSTEM>NPL</TARSYSTEM><AS4USER>DEVELOPER</AS4USER><AS4DATE>20260901</AS4DATE><AS4TIME>100000</AS4TIME><AS4TEXT>${text}</AS4TEXT><CLIENT>001</CLIENT></REQ_HEADER><TASK_HEADERS/></CTS_REQUEST>`
+const header = (trkorr: string, text: string, owner: string) =>
+  `<TRKORR>${trkorr}</TRKORR><TRFUNCTION>K</TRFUNCTION><TRSTATUS>D</TRSTATUS><TARSYSTEM>NPL</TARSYSTEM><AS4USER>${owner}</AS4USER><AS4DATE>20260901</AS4DATE><AS4TIME>100000</AS4TIME><AS4TEXT>${text}</AS4TEXT><CLIENT>001</CLIENT>`
 
-export const transportChecks = (dlvunit = "HOME", requests = [request("NPLK900010", "Demo transport"), request("NPLK900020", "Other transport")]) =>
+export const request = (trkorr: string, text: string, owner = "DEVELOPER") => `<CTS_REQUEST><REQ_HEADER>${header(trkorr, text, owner)}</REQ_HEADER><TASK_HEADERS/></CTS_REQUEST>`
+
+/** LOCKS content: the object is recorded in request `trkorr` (owner) with one task. */
+export const objectLock = (trkorr: string, text: string, owner: string, task: string, taskOwner: string) =>
+  `<CTS_OBJECT_LOCK><OBJECT_KEY><OBJ_NAME>ZCL_DEMO</OBJ_NAME><OBJECT>CLAS</OBJECT><PGMID>R3TR</PGMID></OBJECT_KEY><LOCK_HOLDER><REQ_HEADER>${header(trkorr, text, owner)}</REQ_HEADER><TASK_HEADERS><CTS_TASK_HEADER>${header(task, text, taskOwner)}</CTS_TASK_HEADER></TASK_HEADERS></LOCK_HOLDER></CTS_OBJECT_LOCK>`
+
+export const transportChecks = (dlvunit = "HOME", requests = [request("NPLK900010", "Demo transport"), request("NPLK900020", "Other transport")], locks = "") =>
   `<?xml version="1.0" encoding="utf-8"?>
 <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DATA>
 <PGMID>R3TR</PGMID><OBJECT>CLAS</OBJECT><OBJECTNAME>ZCL_DEMO</OBJECTNAME><OPERATION/><DEVCLASS>ZDEMO</DEVCLASS><CTEXT>Demo package</CTEXT><KORRFLAG>X</KORRFLAG><AS4USER>DEVELOPER</AS4USER><PDEVCLASS/><DLVUNIT>${dlvunit}</DLVUNIT><NAMESPACE/><RESULT>S</RESULT><RECORDING>X</RECORDING><EXISTING_REQ_ONLY/>
-<REQUESTS>${requests.join("")}</REQUESTS><LOCKS/>
+<REQUESTS>${requests.join("")}</REQUESTS>${locks ? `<LOCKS>${locks}</LOCKS>` : "<LOCKS/>"}
 </DATA></asx:values></asx:abap>`
 
 export const activationErrors = `<?xml version="1.0" encoding="utf-8"?>
@@ -138,3 +145,29 @@ export const adtError = (message: string) => `<?xml version="1.0" encoding="utf-
   <message lang="EN">${message}</message><localizedMessage lang="EN">${message}</localizedMessage>
   <properties/>
 </exc:exception>`
+
+export const ddlsStructure = `<?xml version="1.0" encoding="utf-8"?>
+<ddl:ddlSource xmlns:ddl="http://www.sap.com/adt/ddic/ddlsources" xmlns:abapsource="http://www.sap.com/adt/abapsource" ${ADTCORE} xmlns:atom="http://www.w3.org/2005/Atom"
+  abapsource:sourceUri="source/main" adtcore:responsible="DEVELOPER" adtcore:name="ZI_DEMO" adtcore:type="DDLS/DF"
+  adtcore:changedAt="2026-09-01T10:00:00Z" adtcore:version="active" adtcore:createdAt="2026-08-01T00:00:00Z" adtcore:changedBy="DEVELOPER" adtcore:description="Demo view" adtcore:language="EN">
+  ${links("source/main")}
+</ddl:ddlSource>`
+
+export const structureStructure = `<?xml version="1.0" encoding="utf-8"?>
+<blue:blueSource xmlns:blue="http://www.sap.com/wbobj/blue" xmlns:abapsource="http://www.sap.com/adt/abapsource" ${ADTCORE} xmlns:atom="http://www.w3.org/2005/Atom"
+  abapsource:sourceUri="source/main" adtcore:responsible="DEVELOPER" adtcore:name="ZS_DEMO" adtcore:type="TABL/DS"
+  adtcore:changedAt="2026-09-01T10:00:00Z" adtcore:version="active" adtcore:createdAt="2026-08-01T00:00:00Z" adtcore:changedBy="DEVELOPER" adtcore:description="Demo structure" adtcore:language="EN">
+  ${links("source/main")}
+</blue:blueSource>`
+
+export const validationOk = `<?xml version="1.0" encoding="utf-8"?><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DATA><CHECK_RESULT>X</CHECK_RESULT></DATA></asx:values></asx:abap>`
+
+export const parentPackage = `<?xml version="1.0" encoding="utf-8"?>
+<pak:package xmlns:pak="http://www.sap.com/adt/packages" ${ADTCORE} adtcore:name="ZPARENT" adtcore:type="DEVC/K" adtcore:description="Parent package">
+  <pak:attributes pak:packageType="structure"/>
+  <pak:superPackage/>
+  <pak:transport>
+    <pak:softwareComponent pak:name="HOME" pak:description="Customer developments"/>
+    <pak:transportLayer pak:name="ZNPL" pak:description="Customer layer"/>
+  </pak:transport>
+</pak:package>`

@@ -21,6 +21,10 @@ registration and skill registration, follow the
   documentation or other files. Use environment-variable references or the
   configured browser SSO flow. Let the server manage its own session cache;
   never copy that cache or the browser profile into downloads or version control.
+- Work through the tools only. Do not import the server's modules, run its
+  `dist` files from scripts, or read its session cache (`~/.abap-adt-mcp`) to
+  reach SAP another way. If a needed capability is missing, tell the user what
+  is missing instead of building a workaround.
 
 ## ADT tool selection
 
@@ -37,9 +41,9 @@ registration and skill registration, follow the
 | Replace full source | `abap_write_source` replaces the complete object or selected include, then checks syntax by default. |
 | Check syntax | `abap_syntax_check` checks current source or a supplied unsaved candidate. |
 | Inspect transport requirements | `abap_transport_info` reports the existing request lock and candidate transports. |
-| Find a transport | `abap_list_transports` lists modifiable workbench requests and tasks. |
+| Find a transport | `abap_list_transports` lists modifiable workbench and customizing requests the user owns or has a task in (no wildcards). |
 | Create a transport | `abap_create_transport` creates a request for an object or package when needed for the authorized change. |
-| Create an object | `abap_create_object` creates a supported empty object; supply the package and transport, and a parent function group where required. Then write and activate its source. |
+| Create an object | `abap_create_object` creates a supported empty object; supply the package and transport, and a parent function group where required. Then write and activate its source. For a package (`DEVC/K`) pass the super package as `package`; software component and transport layer default to the super package's. |
 | Activate changes | `abap_activate` activates specified objects and returns the activation log. |
 | Inspect pending activation | `abap_inactive_objects` lists the current user's inactive objects and transports. |
 | Test behavior | `abap_run_unit_tests` runs ABAP Unit for the relevant object. |
@@ -122,6 +126,7 @@ workflow above. A download request alone does not authorize remote changes.
 
 | Symptom | Agent response |
 |---|---|
+| A tool answers "SAP needs a new single sign-on logon" | A browser window is open for the logon. Tell the user to complete the sign-in there (never choose an account for them), wait for their confirmation, then repeat the call. Do not retry in a loop. |
 | SSO logon waits or opens a browser | Allow the user to complete browser logon/MFA. SSO requires Node.js 22+ and Edge or Chrome; an ADT discovery XML download is expected. For persistent failures, use the setup guide's logon and `--check` steps with the configured system file. Never ask the user to paste cookies into chat. |
 | Proxy 502 or `ERR_PROXY_TUNNEL` | Check the configured SAP host and corporate network access. Use `noProxy: true` / `SAP_NO_PROXY=true`, or add the SAP host to `NO_PROXY`, when direct access is appropriate. See the setup guide for configuration. |
 | TLS certificate-chain error | Use the corporate CA PEM through `caCert` / `SAP_CA_CERT` or `NODE_EXTRA_CA_CERTS`. Keep certificate verification enabled; do not fix this by enabling `allowSelfSigned`. Keep local `corp-ca.pem` out of version control. |

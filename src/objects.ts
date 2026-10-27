@@ -101,21 +101,66 @@ export function normalizeType(type?: string): { full?: string; short?: string } 
 const describe = (r: SearchResult) =>
   `${r["adtcore:type"]} ${r["adtcore:name"]}${r["adtcore:description"] ? ` (${r["adtcore:description"]})` : ""} ${r["adtcore:uri"]}`
 
+/** Includes look the same whether they belong to a program or a function group. */
+const EQUIVALENT_TYPES: Record<string, string[]> = { "PROG/I": ["PROG/I", "FUGR/I"], "FUGR/I": ["FUGR/I", "PROG/I"] }
+
+/**
+ * Builds the type filter for a name lookup. A bare repository type such as TABL or PROG
+ * matches every subtype (TABL finds tables and structures); aliases (FUNC, STRUCTURE ...) and
+ * full ids (TABL/DT) match exactly, except that program and function group includes are
+ * interchangeable.
+ */
+export function typeMatcher(type?: string): (resultType: string) => boolean {
+  const raw = type?.trim().toUpperCase()
+  if (!raw) return () => true
+  const { full, short } = normalizeType(raw)
+  const loose = !raw.includes("/") && raw === short
+  const accepted = full ? (EQUIVALENT_TYPES[full] ?? [full]) : []
+  return resultType => {
+    const rt = resultType.toUpperCase()
+    if (loose || !full) return rt.split("/")[0] === short
+    return accepted.includes(rt)
+  }
+}
+
+/** URI of the object a search hit stands for: STOB hits point into the source of their DDLS. */
+const baseUri = (r: SearchResult) =>
+  `${r["adtcore:uri"]}`
+    .replace(/[?#].*$/, "")
+    .replace(/\/source\/main$/i, "")
+    .toLowerCase()
+
+/** One hit per object: drops secondary hits such as the STOB entry of a CDS view. */
+export function distinctObjects(hits: SearchResult[]): SearchResult[] {
+  const byUri = new Map<string, SearchResult>()
+  for (const h of hits) {
+    const key = baseUri(h)
+    const seen = byUri.get(key)
+    if (!seen || (/#/.test(seen["adtcore:uri"]) && !/#/.test(h["adtcore:uri"]))) byUri.set(key, h)
+  }
+  return [...byUri.values()]
+}
+
+/** True for answers that mean "this query cannot be answered" rather than "the system is unreachable". */
+const isClientError = (e: unknown) => {
+  const status = (e as { err?: unknown })?.err ?? (e as { status?: unknown })?.status
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 401
+}
+
 async function searchExact(system: AbapSystem, name: string, type?: string): Promise<SearchResult[]> {
   const { full, short } = normalizeType(type)
   const searchType = short === "FUGR" && full === "FUGR/FF" ? "FUNC" : short
+  const accept = typeMatcher(type)
   const matches = (results: SearchResult[]) =>
-    results.filter(r => {
-      if (`${r["adtcore:name"]}`.toUpperCase() !== name) return false
-      if (!type) return true
-      const rt = r["adtcore:type"].toUpperCase()
-      return full ? rt === full : rt.split("/")[0] === short
-    })
+    results.filter(r => `${r["adtcore:name"]}`.toUpperCase() === name && accept(r["adtcore:type"]))
   const tryQuery = async (q: string, t?: string) => {
     try {
       return matches(await system.reader.searchObject(q, t, 100))
-    } catch {
-      return []
+    } catch (e) {
+      // an unsupported type filter is answered with 4xx: try the next query. Timeouts, server
+      // errors and failed logons end the lookup, retrying them only multiplies the wait
+      if (isClientError(e)) return []
+      throw e
     }
   }
   let hits = await tryQuery(name, searchType)
@@ -143,13 +188,13 @@ export async function resolveObject(system: AbapSystem, spec: ObjectSpec): Promi
       throw new ObjectNotFoundError(
         `No object named ${name}${spec.type ? ` of type ${spec.type}` : ""} found in ${system.name}. Use abap_search_objects with a wildcard (e.g. ${name}*) to look for candidates.`
       )
-    const distinct = new Map(hits.map(h => [`${h["adtcore:type"]}|${h["adtcore:uri"]}`, h]))
-    if (distinct.size > 1)
+    const distinct = distinctObjects(hits)
+    if (distinct.length > 1)
       throw new AmbiguousObjectError(
-        `Several objects are named ${name}. Pass the type or uri parameter:\n` +
-          [...distinct.values()].map(h => `  - ${describe(h)}`).join("\n")
+        `Several objects are named ${name}. Pass the type (e.g. ${distinct[0]["adtcore:type"]}) or the uri parameter:\n` +
+          distinct.map(h => `  - ${describe(h)}`).join("\n")
       )
-    hit = hits[0]
+    hit = distinct[0]
     objectUrl = hit["adtcore:uri"].replace(/[?#].*$/, "")
     if (/\/oo\/classes\//i.test(objectUrl)) {
       ;({ objectUrl, include } = splitUri(objectUrl, include))

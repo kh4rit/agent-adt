@@ -63,6 +63,7 @@ export class AbapSystem {
           headless: sso.headless,
           timeoutSeconds: sso.timeout,
           maxAgeHours: sso.maxAgeHours,
+          waitSeconds: sso.waitSeconds ?? 45,
           log: log(config.name)
         })
         provider = this.sso

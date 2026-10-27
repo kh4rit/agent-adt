@@ -3,6 +3,9 @@ import { isAdtError, isHttpError } from "abap-adt-api"
 /** Turns any thrown value into a message an agent can act on. */
 export function errorMessage(e: unknown): string {
   if (isAdtError(e)) {
+    // abap-adt-api reports failures of the HTTP layer that are not HTTP answers (logon needed,
+    // network) as "500 Unknown error" with the original error as text
+    if (e.type === "Unknown error" && !e.localizedMessage) return `${e.message}`.replace(/^(\w*Error): /, "")
     const parts: string[] = []
     const status = e.err && e.err >= 100 ? `HTTP ${e.err}` : ""
     parts.push([status, e.type, e.message].filter(Boolean).join(" "))

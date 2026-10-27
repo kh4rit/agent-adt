@@ -34,7 +34,7 @@ const objectParams = {
     .string()
     .optional()
     .describe(
-      "ADT object type, used to disambiguate names: CLAS/OC class, INTF/OI interface, PROG/P program, PROG/I include, FUGR/FF function module, FUGR/F function group, FUGR/I function group include, DDLS/DF CDS view, TABL/DT table, DTEL/DE data element. Short forms (CLAS, PROG, FUNC ...) are accepted."
+      "ADT object type, used to disambiguate names: CLAS/OC class, INTF/OI interface, PROG/P program, PROG/I include, FUGR/FF function module, FUGR/F function group, FUGR/I function group include, DDLS/DF CDS view, TABL/DT table, TABL/DS structure, DTEL/DE data element. A bare type (TABL, PROG, DDLS ...) matches all its subtypes, e.g. TABL finds tables and structures; FUNC = function module. PROG/I and FUGR/I are interchangeable."
     ),
   uri: z
     .string()
@@ -299,7 +299,7 @@ export function registerTools(server: McpServer, systems: Systems) {
     {
       title: "Transport info of an object",
       description:
-        "Tells whether changing an object requires a transport request, which request already locks it, and which of your modifiable requests could record it. Call this before abap_write_source when unsure about the transport.",
+        "Tells whether changing an object requires a transport request, which request already locks it (with owner and tasks) and, if none does, which modifiable requests SAP proposes for its package (these may belong to other users). Call this before abap_write_source when unsure about the transport.",
       inputSchema: objectParams,
       annotations: readOnly
     },
@@ -315,7 +315,7 @@ export function registerTools(server: McpServer, systems: Systems) {
     "abap_list_transports",
     {
       title: "List transport requests",
-      description: "Lists the modifiable workbench transport requests (with tasks) of a user, default the logged-on user. Use the request or task number as `transport` when saving.",
+      description: "Lists the modifiable workbench and customizing requests (with tasks) that a user owns or has a task in, default the logged-on user. Use the request or task number as `transport` when saving. Wildcards are not supported.",
       inputSchema: {
         user: z.string().optional().describe("SAP user name; default: the configured user."),
         withObjects: z.boolean().optional().describe("Also list the objects recorded in each request (default false)."),
@@ -358,14 +358,17 @@ export function registerTools(server: McpServer, systems: Systems) {
     "abap_create_object",
     {
       title: "Create object",
-      description: `Creates a new, empty repository object in a package (class, interface, program, include, function group, function module, CDS view ...). Supported types: ${supportedCreateTypes()}. Afterwards write its source with abap_write_source and activate it.`,
+      description: `Creates a new, empty repository object in a package (class, interface, program, include, function group, function module, CDS view ...). Supported types: ${supportedCreateTypes()}. Afterwards write its source with abap_write_source and activate it. A package (DEVC/K) is created below the given super package with its software component and transport layer unless they are passed.`,
       inputSchema: {
         type: z.string().describe("Object type, e.g. CLAS/OC, INTF/OI, PROG/P, PROG/I, FUGR/F, FUGR/FF, DDLS/DF."),
         name: z.string().describe("Name of the new object (customer namespace, e.g. ZCL_...)."),
         description: z.string().describe("Short description."),
-        package: z.string().describe("Target package, e.g. $TMP for local objects."),
+        package: z.string().describe("Target package, e.g. $TMP for local objects. For a new package (DEVC/K): its super package."),
         parent: z.string().optional().describe("Function group name, required for FUGR/FF and FUGR/I."),
         transport: z.string().optional().describe("Transport request for transportable packages."),
+        softwareComponent: z.string().optional().describe("DEVC/K only: software component; default the super package's (LOCAL for $ packages)."),
+        transportLayer: z.string().optional().describe("DEVC/K only: transport layer; default the super package's."),
+        packageType: z.enum(["development", "structure", "main"]).optional().describe("DEVC/K only: package type, default development."),
         system: systemParam
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.2
+
+- Name lookups: a bare type matches all subtypes (`TABL` finds structures, `PROG` includes);
+  `PROG/I` and `FUGR/I` are interchangeable; the `STOB` hit of a CDS view no longer makes its
+  name ambiguous
+- Name lookups stop at the first timeout, server error or failed logon instead of running
+  three queries that each wait for the HTTP timeout; only 4xx answers fall through
+- SSO: a tool call waits at most `sso.waitSeconds` (default 45) for a running browser logon,
+  then returns a message asking the user to finish the sign-in and retry; the logon continues
+  in the background. Before, calls hung until the MCP host cancelled them. The CLI still waits
+- Errors of the HTTP layer that are not HTTP answers (logon needed, network, timeout) are
+  reported with their own text instead of "HTTP 500 Unknown error"
+- `abap_create_object` creates packages (`DEVC/K`) below a super package, taking software
+  component and transport layer from it unless given; the request body is built here because
+  abap-adt-api's template carries a fixed package reference
+- `abap_transport_info` shows owner and tasks of the locking request and whether the user has a
+  task in it, and no longer calls proposed requests of other users "your" requests
+- `abap_list_transports` rejects wildcard user names instead of reporting an empty list
+- Skill: work through the tools only; what to do when a tool asks for the SSO sign-in
+
 ## 0.3.1
 
 - Config files starting with a UTF-8 byte order mark (as written by PowerShell) are accepted

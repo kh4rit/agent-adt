@@ -57,6 +57,8 @@ async function main() {
   const selected = only ? [systems.get(only)] : systems.list()
 
   if (argv.includes("--sso-login") || argv.includes("--check")) {
+    // the CLI has no host timeout: wait for interactive logons to finish
+    for (const system of selected) if (system.sso) system.sso.waitSeconds = undefined
     let failed = 0
     for (const system of selected) {
       const c = system.config

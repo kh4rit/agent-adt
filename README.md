@@ -127,6 +127,7 @@ Chromium based browser. Settings (config file `sso: { ... }` or environment):
 | `headless` | `SAP_SSO_HEADLESS` | `false` to always open a visible window (default: try silently first, 30 s) |
 | `timeout` | `SAP_SSO_TIMEOUT` | Seconds to wait for the interactive logon (default 300) |
 | `maxAgeHours` | `SAP_SSO_MAX_AGE_HOURS` | Re-logon after this many hours even without a rejection (default 8) |
+| `waitSeconds` | `SAP_SSO_WAIT` | Seconds a tool call waits for a running logon (default 45, covers the silent logon). After that the call returns a message asking the user to finish the sign-in in the open browser window and retry, while the logon continues; MCP hosts would otherwise cancel the call. The CLI (`--check`, `--sso-login`, `--call`) always waits |
 
 In sso and cookie mode reads and writes share one SAP session (the library cannot clone a
 client with an injected HTTP layer); tool calls are handled sequentially anyway.
@@ -275,9 +276,9 @@ together with the other skills (`copilot skill add <repo>/skills`). Requires Nod
 | `abap_activate` | Activate objects (or all inactive objects of the user) and return the activation log |
 | `abap_inactive_objects` | Inactive objects of the user with their transports |
 | `abap_transport_info` | Does the object need a transport, which one locks it, which ones could take it |
-| `abap_list_transports` | Modifiable workbench requests and tasks of a user |
+| `abap_list_transports` | Modifiable workbench and customizing requests a user owns or has a task in |
 | `abap_create_transport` | Create a workbench request for an object or package |
-| `abap_create_object` | Create an empty class, interface, program, include, function group/module, CDS view ... |
+| `abap_create_object` | Create an empty class, interface, program, include, function group/module, CDS view ..., or a package (software component and transport layer taken from the super package) |
 | `abap_find_usages` | Where-used list of an object or of the symbol at a source position |
 | `abap_package_contents` | Objects of a package grouped by type |
 | `abap_object_outline` | Methods, attributes, events of a class or interface |
@@ -286,7 +287,10 @@ together with the other skills (`copilot skill add <repo>/skills`). Requires Nod
 | `abap_ui5_app_info` | Package, description, URL and file inventory of a deployed SAPUI5 app |
 
 Objects are addressed by `name` (plus `type` when the name is ambiguous) or by the ADT `uri`
-returned from the search. Classes accept an `include` parameter (`main`, `testclasses`,
+returned from the search. A bare `type` such as `TABL` or `PROG` matches all its subtypes
+(`TABL` finds tables and structures), full ids such as `TABL/DT` match exactly, and `PROG/I`
+and `FUGR/I` are interchangeable. The `STOB` entry the search returns next to a CDS view does
+not make the name ambiguous. Classes accept an `include` parameter (`main`, `testclasses`,
 `definitions`, `implementations`, `macros`).
 
 ### How saving works

@@ -38,10 +38,19 @@ export interface SsoOptions {
   headlessTimeoutSeconds?: number
   /** hours after which the cache is considered stale, default 8 */
   maxAgeHours?: number
+  /**
+   * seconds a caller waits for a running logon before it gets a LogonPendingError; the logon
+   * itself continues. Unset = wait until the logon ends (CLI). MCP hosts cancel tool calls
+   * after a few minutes, so the server must answer before the interactive logon is done.
+   */
+  waitSeconds?: number
   log?: (message: string) => void
 }
 
 export class SsoError extends Error {}
+
+/** A browser logon is running and needs the user; the call should be repeated once it is done. */
+export class LogonPendingError extends SsoError {}
 
 export const dataDir = () => join(homedir(), ".abap-adt-mcp")
 const safeName = (s: string) => s.replace(/[^A-Za-z0-9_.-]/g, "_")
@@ -286,6 +295,7 @@ export class BrowserSsoProvider implements CookieProvider {
     this.cacheFile = o.cacheFile ?? join(dataDir(), `${safeName(o.system)}.cookies.json`)
     this.profileDir = o.profileDir ?? join(dataDir(), "browser-profile")
     this.log = o.log ?? (() => {})
+    this.waitSeconds = o.waitSeconds
   }
 
   get loginUrl() {
@@ -319,12 +329,38 @@ export class BrowserSsoProvider implements CookieProvider {
   }
 
   refresh(reason: string): Promise<string> {
-    if (this.pending) return this.pending
-    // a logon that just happened serves concurrent callers that failed with the old cookies
-    if (this.cache && Date.now() - this.lastLogon < 15000) return Promise.resolve(this.header(this.cache))
-    this.log(`browser logon to ${this.host} (${reason})`)
-    this.pending = this.logon(false).finally(() => (this.pending = undefined))
-    return this.pending
+    if (!this.pending) {
+      // a logon that just happened serves concurrent callers that failed with the old cookies
+      if (this.cache && Date.now() - this.lastLogon < 15000) return Promise.resolve(this.header(this.cache))
+      this.log(`browser logon to ${this.host} (${reason})`)
+      this.pending = this.logon(false).finally(() => (this.pending = undefined))
+      // callers that stopped waiting must not turn a failed logon into an unhandled rejection
+      this.pending.catch(() => undefined)
+    }
+    return this.waitFor(this.pending)
+  }
+
+  /** Seconds callers wait for a running logon; undefined = until it ends. */
+  waitSeconds?: number
+
+  private waitFor(logon: Promise<string>): Promise<string> {
+    if (this.waitSeconds === undefined) return logon
+    let timer: NodeJS.Timeout | undefined
+    const gaveUp = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new LogonPendingError(
+              `SAP needs a new single sign-on logon to ${this.host}: a browser window is open for it. ` +
+                `Ask the user to complete the sign-in there (no account choice is made for them), then call the tool again. ` +
+                `The window waits up to ${this.o.timeoutSeconds ?? 300}s and closes itself after the logon.`
+            )
+          ),
+        this.waitSeconds! * 1000
+      )
+      timer.unref?.()
+    })
+    return Promise.race([logon, gaveUp]).finally(() => clearTimeout(timer))
   }
 
   /** Runs the browser logon; `interactive` skips the silent attempt. */

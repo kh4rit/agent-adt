@@ -20,6 +20,8 @@ export interface SsoConfig {
   timeout?: number
   /** Hours after which cached cookies are considered stale, default 8. */
   maxAgeHours?: number
+  /** Seconds a tool call waits for a running browser logon before it asks the user to sign in and retry, default 45. */
+  waitSeconds?: number
 }
 
 /** Connection details for one SAP system. */
@@ -111,7 +113,8 @@ function normalizeSso(raw: unknown, env: NodeJS.ProcessEnv, name: string): SsoCo
     loginUrl: optionalString(r.loginUrl, env),
     headless: parseBool(r.headless),
     timeout: optionalNumber(r.timeout, name, "sso.timeout"),
-    maxAgeHours: optionalNumber(r.maxAgeHours, name, "sso.maxAgeHours")
+    maxAgeHours: optionalNumber(r.maxAgeHours, name, "sso.maxAgeHours"),
+    waitSeconds: optionalNumber(r.waitSeconds, name, "sso.waitSeconds")
   }
 }
 
@@ -166,7 +169,8 @@ export function systemFromEnv(env: NodeJS.ProcessEnv): SystemConfig | undefined 
     loginUrl: env.SAP_SSO_LOGIN_URL || undefined,
     headless: parseBool(env.SAP_SSO_HEADLESS),
     timeout: optionalNumber(env.SAP_SSO_TIMEOUT, name, "SAP_SSO_TIMEOUT"),
-    maxAgeHours: optionalNumber(env.SAP_SSO_MAX_AGE_HOURS, name, "SAP_SSO_MAX_AGE_HOURS")
+    maxAgeHours: optionalNumber(env.SAP_SSO_MAX_AGE_HOURS, name, "SAP_SSO_MAX_AGE_HOURS"),
+    waitSeconds: optionalNumber(env.SAP_SSO_WAIT, name, "SAP_SSO_WAIT")
   }
   return validateSystem({
     name,

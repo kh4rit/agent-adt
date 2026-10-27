@@ -5,10 +5,12 @@ import { line, plural } from "../format.js"
 
 export class TransportRequiredError extends Error {}
 
-export function candidates(info: TransportInfo): string {
+/** Modifiable requests SAP proposes for the object's package; they may belong to other users. */
+export function candidates(info: TransportInfo, user?: string): string {
   const list = info.TRANSPORTS ?? []
-  if (!list.length) return "  (no modifiable transport request of yours contains this package yet)"
-  return list.map(t => `  - ${t.TRKORR}  ${t.AS4TEXT ?? ""}  (owner ${t.AS4USER}, status ${t.TRSTATUS})`).join("\n")
+  if (!list.length) return "  (SAP proposes no modifiable transport request for this package)"
+  const mine = (owner?: string) => !!user && owner?.toUpperCase() === user.toUpperCase()
+  return list.map(t => `  - ${t.TRKORR}  ${t.AS4TEXT ?? ""}  (owner ${t.AS4USER}${mine(t.AS4USER) ? ", yours" : ""}, status ${t.TRSTATUS})`).join("\n")
 }
 
 /**
@@ -38,7 +40,7 @@ export async function transportForLockedObject(
   if (wanted) return { transport: wanted }
   throw new TransportRequiredError(
     `${obj.type} ${obj.name} is in transportable package ${info.DEVCLASS} and needs a transport request. ` +
-      `Nothing was saved. Pass the transport parameter with one of your modifiable requests, or create one with abap_create_transport:\n` +
+      `Nothing was saved. Pass the transport parameter with one of the modifiable requests SAP proposes, or create one with abap_create_transport:\n` +
       candidates(info)
   )
 }
@@ -50,13 +52,24 @@ export async function describeTransportInfo(system: AbapSystem, obj: ResolvedObj
   const out: string[] = [`${obj.type} ${obj.name}  package ${info.DEVCLASS || pkg || "?"}  delivery unit ${info.DLVUNIT || "?"}`]
   if (info.DLVUNIT === "LOCAL") out.push("Local object: changes are saved without a transport request.")
   else out.push("Transportable object: a transport request is required for changes.")
-  if (info.LOCKS?.HEADER)
+  const header = info.LOCKS?.HEADER
+  if (header?.TRKORR) {
+    const tasks = info.LOCKS?.TASKS ?? []
+    const owner = header.AS4USER ? `, owner ${header.AS4USER}` : ""
     out.push(
-      `Currently locked in transport ${info.LOCKS.HEADER.TRKORR} (${info.LOCKS.HEADER.AS4TEXT ?? ""})` +
-        (info.LOCKS.TASKS?.length ? `, tasks: ${info.LOCKS.TASKS.map(t => t.TRKORR).join(", ")}` : "")
+      `Currently locked in transport ${header.TRKORR} (${header.AS4TEXT ?? ""}${owner})` +
+        (tasks.length ? `, tasks: ${tasks.map(t => `${t.TRKORR}${t.AS4USER ? ` (${t.AS4USER})` : ""}`).join(", ")}` : "")
     )
-  if (info.TRANSPORTS?.length) out.push("Your modifiable transport requests for this package:\n" + candidates(info))
-  else if (info.DLVUNIT !== "LOCAL") out.push("You have no modifiable transport request for this package yet.")
+    const myTask = tasks.find(t => t.AS4USER?.toUpperCase() === system.user)
+    if (myTask) out.push(`Changes you save are recorded in your task ${myTask.TRKORR}.`)
+    else
+      out.push(
+        `Changes must go to ${header.TRKORR}: pass it as the transport parameter. Saving records them in ${system.user}'s task of that request (SAP creates the task if there is none yet).`
+      )
+  } else if (info.TRANSPORTS?.length)
+    out.push(`Modifiable transport requests SAP proposes for this package (pass one as the transport parameter):\n` + candidates(info, system.user))
+  else if (info.DLVUNIT !== "LOCAL")
+    out.push("SAP proposes no modifiable transport request for this package: create one with abap_create_transport.")
   if (info.MESSAGES?.length) out.push(info.MESSAGES.map(m => `${m.SEVERITY}: ${m.TEXT}`).join("\n"))
   return out.join("\n")
 }
@@ -77,7 +90,11 @@ const formatRequest = (r: TransportRequest, withObjects: boolean): string => {
 /** Lists the modifiable workbench and customizing requests of a user. */
 export async function listTransports(system: AbapSystem, user?: string, withObjects = false): Promise<string> {
   const who = (user?.trim() || system.user).toUpperCase()
-  const all = await system.reader.userTransports(who, true)
+  if (/[*?%+]/.test(who))
+    throw new Error(
+      `user must be one SAP user name; ADT does not support wildcards ("${who}"). To find the request an object is recorded in, use abap_transport_info on the object.`
+    )
+  const all =await system.reader.userTransports(who, true)
   const out: string[] = []
   for (const [kind, targets] of [
     ["Workbench", all.workbench],

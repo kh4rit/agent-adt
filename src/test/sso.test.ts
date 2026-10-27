@@ -4,7 +4,8 @@ import { mkdtempSync, readFileSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { CookieAuthHttpClient, isSamlChallenge, parseCookieHeader, SessionExpiredError, type CookieProvider, type HttpOptions, type HttpResponse } from "../cookieHttp.js"
-import { cookiesForHost, hasSapSession, isStale, loadCache, parseDevToolsActivePort, saveCache, StaticCookieProvider, toCookieHeader, type CookieCache } from "../sso.js"
+import { BrowserSsoProvider, cookiesForHost, hasSapSession, isStale, loadCache, LogonPendingError, parseDevToolsActivePort, saveCache, StaticCookieProvider, toCookieHeader, type CookieCache } from "../sso.js"
+import { errorMessage } from "../format.js"
 import { bypassProxy } from "../connection.js"
 import { parseConfigFile, systemFromEnv } from "../config.js"
 import { resolveObject } from "../objects.js"
@@ -178,4 +179,37 @@ test("bypassProxy adds the SAP host to NO_PROXY without duplicates", () => {
   bypassProxy("https://SAP-DEV.example.com/", env)
   assert.equal(env.NO_PROXY, "localhost,127.0.0.1,sap-dev.example.com")
   assert.equal(env.no_proxy, "sap-dev.example.com")
+})
+
+test("a tool call stops waiting for a running browser logon and asks for the sign-in; the logon continues", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "adt-sso-wait-"))
+  class SlowSso extends BrowserSsoProvider {
+    logons = 0
+    finish?: (header: string) => void
+    override async logon(): Promise<string> {
+      this.logons++
+      return new Promise<string>(resolve => (this.finish = resolve))
+    }
+  }
+  const sso = new SlowSso({ system: "DEV", baseUrl: "https://sap.example.com", cacheFile: join(dir, "c.json"), waitSeconds: 0.05 })
+  await assert.rejects(sso.cookieHeader(), LogonPendingError)
+  await assert.rejects(sso.refresh("again"), /complete the sign-in there.*call the tool again/)
+  assert.equal(sso.logons, 1, "callers share the running logon")
+  sso.waitSeconds = undefined
+  const waiting = sso.refresh("cli")
+  sso.finish!("MYSAPSSO2=t")
+  assert.equal(await waiting, "MYSAPSSO2=t")
+  assert.equal(sso.logons, 1)
+})
+
+test("errors of the cookie layer reach the agent with their own text, not as HTTP 500", async () => {
+  const provider: CookieProvider = {
+    description: "browser SSO session",
+    cookieHeader: async () => {
+      throw new LogonPendingError("SAP needs a new single sign-on logon to sap.example.com")
+    }
+  }
+  const system = makeSystem(new CookieAuthHttpClient(new FakeHttp(), provider), { auth: "sso", password: undefined })
+  const e = await resolveObject(system, { name: "ZCL_DEMO" }).catch(err => err)
+  assert.equal(errorMessage(e), "SAP needs a new single sign-on logon to sap.example.com")
 })
