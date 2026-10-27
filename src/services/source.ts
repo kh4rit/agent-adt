@@ -1,4 +1,4 @@
-import type { SyntaxCheckResult } from "abap-adt-api"
+import type { classIncludes, Revision, SyntaxCheckResult } from "abap-adt-api"
 import type { AbapSystem } from "../connection.js"
 import { label, type ResolvedObject } from "../objects.js"
 import { numbered, plural } from "../format.js"
@@ -31,6 +31,49 @@ export async function readSource(system: AbapSystem, obj: ResolvedObject, option
   const header = `${label(obj)} [${version}]` + (start > 1 || end < lines.length ? ` lines ${start}-${end} of ${lines.length}` : ` ${plural(lines.length, "line")}`)
   const body = options.lineNumbers ? numbered(slice, start) : slice
   return { source, version, totalLines: lines.length, text: `${header}\n${body}` }
+}
+
+/** Number of a stored version ("00001") from its content URI. */
+export const revisionNumber = (uri: string) => uri.match(/\/versions\/\d+\/(\d+)\/content$/)?.[1]
+
+/** Stored versions of an object (or class include), newest first, as listed by SAP. */
+export async function listRevisions(system: AbapSystem, obj: ResolvedObject): Promise<Revision[]> {
+  if (!obj.hasSource) throw new Error(`${label(obj)} has no ABAP source, so it has no source versions`)
+  try {
+    return await system.reader.revisions(obj.structure, obj.isClass ? (obj.include as classIncludes) : undefined)
+  } catch (e) {
+    if (/Revision URL not found/.test(`${(e as Error).message}`)) throw new Error(`SAP offers no version history for ${label(obj)} through ADT`)
+    throw e
+  }
+}
+
+export function formatRevisions(obj: ResolvedObject, revisions: Revision[]): string {
+  if (!revisions.length) return `${label(obj)} has no stored versions (it was never released in a transport or saved as a version).`
+  const lines = revisions.map(r =>
+    `- ${revisionNumber(r.uri) ?? "?"}  ${r.date.replace("T", " ").replace(/(:\d\d)(\.\d+)?Z$/, "$1")}  ${r.author}  ${r.version}  ${r.versionTitle}`
+  )
+  return `${plural(revisions.length, "stored version")} of ${label(obj)} (newest first; the current active/inactive source is read with abap_read_source without revision):\n${lines.join("\n")}`
+}
+
+/** Reads a stored version given by number ("00001", "1") or by its content URI. */
+export async function readRevision(system: AbapSystem, obj: ResolvedObject, revision: string, options: Omit<ReadOptions, "version"> = {}): Promise<string> {
+  const wanted = revision.trim()
+  const revisions = await listRevisions(system, obj)
+  const match = /^\/sap\/bc\/adt\//i.test(wanted)
+    ? revisions.find(r => r.uri.toLowerCase() === wanted.toLowerCase())
+    : /^\d+$/.test(wanted)
+      ? revisions.find(r => revisionNumber(r.uri) === wanted.padStart(5, "0"))
+      : undefined
+  if (!match)
+    throw new Error(`${label(obj)} has no stored version "${wanted}". ${formatRevisions(obj, revisions)}`)
+  const source = await system.reader.getObjectSource(match.uri)
+  const lines = source.split(/\r?\n/)
+  const start = Math.max(1, options.startLine ?? 1)
+  const end = Math.min(lines.length, options.endLine ?? lines.length)
+  const slice = lines.slice(start - 1, end).join("\n")
+  const range = start > 1 || end < lines.length ? ` lines ${start}-${end} of ${lines.length}` : ` ${plural(lines.length, "line")}`
+  const header = `${label(obj)} [stored version ${revisionNumber(match.uri)}, ${match.date}, ${match.author}, ${match.version}]${range}`
+  return `${header}\n${options.lineNumbers ? numbered(slice, start) : slice}`
 }
 
 export interface Edit {

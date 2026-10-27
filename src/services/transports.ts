@@ -92,7 +92,7 @@ export async function listTransports(system: AbapSystem, user?: string, withObje
   const who = (user?.trim() || system.user).toUpperCase()
   if (/[*?%+]/.test(who))
     throw new Error(
-      `user must be one SAP user name; ADT does not support wildcards ("${who}"). To find the request an object is recorded in, use abap_transport_info on the object.`
+      `user must be one SAP user name; ADT does not support wildcards ("${who}"). To see a request of another owner, read it by number with abap_read_transport; to find the request an object is recorded in, use abap_transport_info.`
     )
   const all =await system.reader.userTransports(who, true)
   const out: string[] = []
@@ -136,4 +136,116 @@ export async function createTransportFor(
   const number = await system.exclusive(() => system.client.createTransport(ref, description, devclass))
   if (!number) throw new Error("SAP did not return a transport number")
   return number
+}
+
+const decodeXml = (s: string) =>
+  s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&")
+
+/** Attributes of one start tag, keyed without namespace prefix. */
+function tagAttributes(tag: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const m of tag.matchAll(/([\w-]+):([\w-]+)="([^"]*)"/g)) out[m[2]] = decodeXml(m[3])
+  return out
+}
+
+const startTags = (xml: string, element: string) => [...xml.matchAll(new RegExp(`<tm:${element}\\b[^>]*>`, "g"))].map(m => tagAttributes(m[0]))
+
+export interface TransportObject {
+  pgmid: string
+  type: string
+  name: string
+  info?: string
+  description?: string
+}
+
+export interface TransportDetails {
+  number: string
+  owner: string
+  description: string
+  type: string
+  status: string
+  target?: string
+  parent?: string
+  changedAt?: string
+  tasks: { number: string; owner: string; description: string; status: string; objects: TransportObject[] }[]
+  objects: TransportObject[]
+}
+
+const toObject = (a: Record<string, string>): TransportObject => ({
+  pgmid: a.pgmid,
+  type: a.type,
+  name: a.name,
+  info: a.obj_info || undefined,
+  description: a.obj_desc || undefined
+})
+
+/** Parses the transport organizer document of a request or task. */
+export function parseTransport(xml: string): TransportDetails {
+  const requestTag = startTags(xml, "request")[0]
+  const tasks = [...xml.matchAll(/<tm:task\b[^>]*>[\s\S]*?<\/tm:task>|<tm:task\b[^>]*\/>/g)].map(m => {
+    const a = tagAttributes(m[0].match(/^<tm:task\b[^>]*>/)![0])
+    return {
+      number: a.number,
+      owner: a.owner,
+      description: a.desc ?? "",
+      status: a.status_text || a.status,
+      objects: startTags(m[0], "abap_object").map(toObject)
+    }
+  })
+  const head = requestTag ?? (tasks[0] ? startTags(xml, "task")[0] : undefined)
+  if (!head?.number) throw new Error("SAP returned no transport request in the answer")
+  const all = xml.match(/<tm:all_objects\b[\s\S]*?<\/tm:all_objects>/)?.[0]
+  let objects = all ? startTags(all, "abap_object").map(toObject) : []
+  if (!objects.length) {
+    const seen = new Set<string>()
+    objects = tasks.flatMap(t => t.objects).filter(o => !seen.has(`${o.pgmid} ${o.type} ${o.name}`) && !!seen.add(`${o.pgmid} ${o.type} ${o.name}`))
+  }
+  const stamp = head.lastchanged_timestamp?.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/)
+  return {
+    number: head.number,
+    owner: head.owner,
+    description: head.desc ?? "",
+    type: head.type,
+    status: head.status_text || head.status,
+    target: head.target || undefined,
+    parent: head.parent || undefined,
+    changedAt: stamp ? `${stamp[1]}-${stamp[2]}-${stamp[3]} ${stamp[4]}:${stamp[5]}:${stamp[6]}` : undefined,
+    tasks: requestTag ? tasks : tasks.slice(1),
+    objects
+  }
+}
+
+const REQUEST_TYPES: Record<string, string> = { K: "workbench request", W: "customizing request", T: "transport of copies", S: "development/correction", R: "repair", C: "relocation" }
+
+const formatObject = (o: TransportObject) => line([`  ${o.pgmid} ${o.type} ${o.name}`, o.info && `(${o.info})`, o.description])
+
+/** Reads a transport request or task by number, including tasks and objects of other users. */
+export async function readTransport(system: AbapSystem, number: string, withObjects = true): Promise<string> {
+  const nr = number.trim().toUpperCase()
+  if (!/^[A-Z0-9]{3}K\d{6}$/.test(nr)) throw new Error(`"${number}" is not a transport request number (e.g. DEVK900123)`)
+  const resp = await system.reader.httpClient.request(`/sap/bc/adt/cts/transportrequests/${nr}`, {
+    headers: { Accept: "application/vnd.sap.adt.transportorganizer.v1+xml" }
+  })
+  const t = parseTransport(String(resp.body ?? ""))
+  const out: string[] = []
+  // SAP answers a task number with the document of its request
+  if (t.number !== nr && t.tasks.some(task => task.number === nr)) out.push(`${nr} is a task of request ${t.number}.`)
+  out.push(
+    `${t.parent ? "Task" : "Request"} ${t.number}  ${t.description}`,
+    line([
+      REQUEST_TYPES[t.type] ?? t.type,
+      `owner ${t.owner}`,
+      `status ${t.status}`,
+      t.target && `target ${t.target}`,
+      t.parent && `request ${t.parent}`,
+      t.changedAt && `last changed ${t.changedAt}`
+    ])
+  )
+  if (t.tasks.length) {
+    out.push(`Tasks (${t.tasks.length}):`)
+    for (const task of t.tasks) out.push(line([`  ${task.number}`, `owner ${task.owner}`, task.status, plural(task.objects.length, "object")]))
+  }
+  out.push(t.objects.length ? `Objects (${t.objects.length}):` : "No objects recorded.")
+  if (withObjects) out.push(...t.objects.map(formatObject))
+  return out.join("\n")
 }

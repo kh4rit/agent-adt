@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
-import { ConfigError, loadConfig } from "./config.js"
-import { readFileSync } from "node:fs"
+import { ConfigError, configFile, loadConfig } from "./config.js"
+import { readFileSync, watchFile } from "node:fs"
 import { callTool, createServer, SERVER_NAME, SERVER_VERSION } from "./server.js"
 import { errorMessage } from "./format.js"
 
@@ -96,6 +96,20 @@ async function main() {
   const transport = new StdioServerTransport()
   await server.connect(transport)
   console.error(`${SERVER_NAME} ${SERVER_VERSION} ready: ${systems.list().map(s => s.name).join(", ")}`)
+
+  // pick up edits of the config file (renamed or added systems) without restarting the host
+  const file = configFile(argv, process.env)
+  if (file)
+    watchFile(file, { interval: 2000 }, (cur, prev) => {
+      if (cur.mtimeMs === prev.mtimeMs) return
+      try {
+        const { added, changed, removed } = systems.update(loadConfig(argv, process.env))
+        const parts = [added.length && `added ${added.join(", ")}`, changed.length && `changed ${changed.join(", ")}`, removed.length && `removed ${removed.join(", ")}`].filter(Boolean)
+        console.error(`config ${file} reloaded${parts.length ? `: ${parts.join("; ")}` : ""}`)
+      } catch (e) {
+        console.error(`config ${file} not reloaded, keeping the previous one: ${e instanceof ConfigError ? e.message : errorMessage(e)}`)
+      }
+    }).unref()
 }
 
 main().catch(e => {

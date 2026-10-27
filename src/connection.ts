@@ -156,15 +156,38 @@ export class AbapSystem {
 
 /** Registry of configured systems. */
 export class Systems {
-  private readonly map = new Map<string, AbapSystem>()
-  readonly defaultName: string
+  private map = new Map<string, AbapSystem>()
+  defaultName = ""
 
   constructor(
-    readonly config: Config,
-    factory: (c: SystemConfig) => AbapSystem = c => new AbapSystem(c)
+    public config: Config,
+    private readonly factory: (c: SystemConfig) => AbapSystem = c => new AbapSystem(c)
   ) {
-    for (const s of config.systems) this.map.set(s.name.toLowerCase(), factory(s))
+    this.update(config)
+  }
+
+  /**
+   * Applies a new configuration (config file edited while the server runs). Systems whose
+   * settings are unchanged keep their session; changed and new ones start fresh.
+   */
+  update(config: Config): { added: string[]; changed: string[]; removed: string[] } {
+    const next = new Map<string, AbapSystem>()
+    const added: string[] = []
+    const changed: string[] = []
+    for (const s of config.systems) {
+      const key = s.name.toLowerCase()
+      const prev = this.map.get(key)
+      if (prev && JSON.stringify(prev.config) === JSON.stringify(s)) next.set(key, prev)
+      else {
+        next.set(key, this.factory(s))
+        ;(prev ? changed : added).push(s.name)
+      }
+    }
+    const removed = [...this.map.values()].filter(s => !next.has(s.name.toLowerCase())).map(s => s.name)
+    this.map = next
+    this.config = config
     this.defaultName = config.defaultSystem ?? config.systems[0]?.name ?? ""
+    return { added, changed, removed }
   }
 
   list(): AbapSystem[] {

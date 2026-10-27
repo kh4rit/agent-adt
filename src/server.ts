@@ -19,7 +19,8 @@ export function createServer(config: Config, factory?: (c: SystemConfig) => Abap
       instructions: [
         "ABAP Development Tools for agents: search, read, edit, save (to transport requests) and activate ABAP objects in SAP systems via ADT.",
         "Typical workflow: abap_search_objects -> abap_read_source -> abap_edit_source or abap_write_source (transport needed for transportable packages; see abap_transport_info / abap_list_transports / abap_create_transport) -> abap_activate -> fix reported errors -> abap_run_unit_tests.",
-        "Saving creates an inactive version; nothing is live until activated. Activation errors include object, line and message."
+        "Saving creates an inactive version; nothing is live until activated. Activation errors include object, line and message.",
+        "Read-only helpers: abap_sql_query (ABAP SQL SELECT via data preview), abap_read_transport (any request by number), abap_list_versions (stored versions), abap_odata_metadata (service $metadata)."
       ].join("\n")
     }
   )

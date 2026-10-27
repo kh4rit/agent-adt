@@ -171,3 +171,118 @@ export const parentPackage = `<?xml version="1.0" encoding="utf-8"?>
     <pak:transportLayer pak:name="ZNPL" pak:description="Customer layer"/>
   </pak:transport>
 </pak:package>`
+
+export const programStructureWithVersions = programStructure.replace(
+  "</program:abapProgram>",
+  `  <atom:link href="source/main/versions" rel="http://www.sap.com/adt/relations/versions" title="Historic versions"/>
+</program:abapProgram>`
+)
+
+const versionEntry = (n: string, stamp: string, date: string, request: string, title: string, author: string) => `<atom:entry>
+  <atom:author><atom:name>${author}</atom:name></atom:author>
+  <atom:content type="text/plain" src="${PROG_URL}/source/main/versions/${stamp}/${n}/content"/>
+  <atom:id>${n}</atom:id>
+  <atom:link adtcore:name="${request}" href="/sap/bc/adt/vit/wb/object_type/%20%20%20%20rq/object_name/${request}" rel="http://www.sap.com/adt/relations/transport/request" type="application/vnd.sap.sapgui" title="${title}"/>
+  <atom:link adtcore:name="${request}" href="/sap/bc/adt/cts/transportrequests/${request}" rel="http://www.sap.com/adt/relations/transport/request" type="application/vnd.sap.adt.transportrequests.v1+xml" title="${title}"/>
+  <atom:title>${title}</atom:title>
+  <atom:updated>${date}</atom:updated>
+</atom:entry>`
+
+/** Version list as SAP returns it (newest first). */
+export const versionFeed = `<?xml version="1.0" encoding="utf-8"?><atom:feed xmlns:atom="http://www.w3.org/2005/Atom" ${ADTCORE}>
+<atom:title>Version List of ZDEMO_REPORT (REPS)</atom:title><atom:updated>2026-10-26T14:31:35Z</atom:updated>
+${versionEntry("00001", "20261026143135", "2026-10-26T14:31:35Z", "NPLK900071", "Second change", "OTHER")}
+${versionEntry("00000", "20261026143135", "2026-10-22T06:29:43Z", "NPLK900070", "First version", "DEVELOPER")}
+</atom:feed>`
+
+const tmLinks = (nr: string) =>
+  `<atom:link href="/sap/bc/adt/cts/transportrequests/${nr}" rel="http://www.sap.com/cts/relations/adturi" type="application/vnd.sap.adt.transportrequests.v1+xml" title="Transport Organizer ADT URI" xmlns:atom="http://www.w3.org/2005/Atom"/>`
+
+const tmObject = (type: string, name: string, info: string, desc = "") =>
+  `<tm:abap_object tm:pgmid="R3TR" tm:type="${type}" tm:name="${name}" tm:wbtype="${type}" tm:obj_info="${info}"${desc ? ` tm:obj_desc="${desc}"` : ""} tm:position="000001" tm:lock_status="X" tm:img_activity="">${tmLinks("NPLK900061")}</tm:abap_object>`
+
+/** Transport organizer document of a request with one task (structure as returned by SAP). */
+export const transportDocument = `<?xml version="1.0" encoding="utf-8"?>
+<tm:root tm:object_type="R" adtcore:name="NPLK900060" adtcore:type="RQRQ" adtcore:changedAt="2026-10-15T13:14:45Z" adtcore:changedBy="OTHER" adtcore:createdBy="OTHER" xmlns:tm="http://www.sap.com/cts/adt/tm" ${ADTCORE}>
+${tmLinks("NPLK900060")}
+<tm:request tm:number="NPLK900060" tm:parent="" tm:owner="OTHER" tm:desc="Demo app &amp; package" tm:type="K" tm:status="D" tm:status_text="Modifiable" tm:target="/NPL/" tm:target_desc="Target group" tm:source_client="001" tm:lastchanged_timestamp="20261015131445" tm:uri="/sap/bc/adt/cts/transportrequests/NPLK900060">
+<tm:long_desc/>
+${tmLinks("NPLK900060")}
+<tm:all_objects>
+${tmObject("WAPA", "ZDEMO_APP", "BSP (Business Server Pages) Application", "Demo app")}
+${tmObject("DEVC", "ZDEMO", "Package", "Demo package")}
+</tm:all_objects>
+<tm:task tm:number="NPLK900061" tm:parent="NPLK900060" tm:owner="OTHER" tm:desc="Demo app &amp; package" tm:type="Development/Correction" tm:status="D" tm:status_text="Modifiable" tm:target="" tm:source_client="001" tm:lastchanged_timestamp="20261017000226" tm:uri="/sap/bc/adt/cts/transportrequests/NPLK900061">
+<tm:long_desc/>
+${tmLinks("NPLK900061")}
+${tmObject("WAPA", "ZDEMO_APP", "BSP (Business Server Pages) Application", "Demo app")}
+${tmObject("DEVC", "ZDEMO", "Package", "Demo package")}
+</tm:task>
+<tm:task tm:number="NPLK900062" tm:parent="NPLK900060" tm:owner="DEVELOPER" tm:desc="Demo app &amp; package" tm:type="Development/Correction" tm:status="D" tm:status_text="Modifiable" tm:target="" tm:source_client="001" tm:lastchanged_timestamp="20261017000226" tm:uri="/sap/bc/adt/cts/transportrequests/NPLK900062">
+<tm:long_desc/>
+</tm:task>
+</tm:request>
+</tm:root>`
+
+export const odataV4Metadata = `<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx">
+  <edmx:DataServices>
+    <Schema Namespace="com.example.demo.v0001" Alias="SAP__self" xmlns="http://docs.oasis-open.org/odata/ns/edm">
+      <EntityType Name="OrderType">
+        <Key><PropertyRef Name="Warehouse"/><PropertyRef Name="OrderId"/></Key>
+        <Property Name="Warehouse" Type="Edm.String" Nullable="false" MaxLength="4"/>
+        <Property Name="OrderId" Type="Edm.String" Nullable="false" MaxLength="10"/>
+        <Property Name="CreatedAt" Type="Edm.DateTimeOffset" Precision="7"/>
+        <NavigationProperty Name="_Task" Type="Collection(com.example.demo.v0001.TaskType)" Partner="_Order"/>
+      </EntityType>
+      <EntityType Name="TaskType">
+        <Key><PropertyRef Name="TaskId"/></Key>
+        <Property Name="TaskId" Type="Edm.String" Nullable="false" MaxLength="12"/>
+        <Property Name="Quantity" Type="Edm.Decimal" Precision="31" Scale="14"/>
+      </EntityType>
+      <Action Name="ConfirmTask" IsBound="true">
+        <Parameter Name="_it" Type="com.example.demo.v0001.TaskType" Nullable="false"/>
+        <Parameter Name="Quantity" Type="Edm.Decimal"/>
+        <ReturnType Type="com.example.demo.v0001.TaskType" Nullable="false"/>
+      </Action>
+      <EntityContainer Name="Container">
+        <EntitySet Name="Order" EntityType="com.example.demo.v0001.OrderType"/>
+        <EntitySet Name="Task" EntityType="com.example.demo.v0001.TaskType"/>
+      </EntityContainer>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>`
+
+export const odataV2Metadata = `<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="1.0" xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx" xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata">
+  <edmx:DataServices m:DataServiceVersion="2.0">
+    <Schema Namespace="ZDEMO_SRV" xmlns="http://schemas.microsoft.com/ado/2008/09/edm">
+      <EntityType Name="Product">
+        <Key><PropertyRef Name="Product"/></Key>
+        <Property Name="Product" Type="Edm.String" Nullable="false" MaxLength="40"/>
+      </EntityType>
+      <EntityContainer Name="ZDEMO_SRV_Entities" m:IsDefaultEntityContainer="true">
+        <EntitySet Name="ProductSet" EntityType="ZDEMO_SRV.Product"/>
+        <FunctionImport Name="Release" ReturnType="ZDEMO_SRV.Product" EntitySet="ProductSet" m:HttpMethod="POST">
+          <Parameter Name="Product" Type="Edm.String" Mode="In"/>
+        </FunctionImport>
+      </EntityContainer>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>`
+
+export const dataPreview = (rows: { TRKORR: string; AS4TEXT: string }[]) => `<?xml version="1.0" encoding="utf-8"?>
+<dataPreview:tableData xmlns:dataPreview="http://www.sap.com/adt/dataPreview">
+  <dataPreview:totalRows>${rows.length}</dataPreview:totalRows>
+  <dataPreview:isHanaAnalyticalView>false</dataPreview:isHanaAnalyticalView>
+  <dataPreview:executedQueryString>SELECT TRKORR, AS4TEXT FROM E07T</dataPreview:executedQueryString>
+  <dataPreview:queryExecutionTime>1.0</dataPreview:queryExecutionTime>
+  <dataPreview:columns>
+    <dataPreview:metadata dataPreview:name="TRKORR" dataPreview:type="C" dataPreview:description="TRKORR" dataPreview:keyAttribute="false" dataPreview:colType="" dataPreview:isKeyFigure="false" dataPreview:length="20"/>
+    <dataPreview:dataSet>${rows.map(r => `<dataPreview:data>${r.TRKORR}</dataPreview:data>`).join("")}</dataPreview:dataSet>
+  </dataPreview:columns>
+  <dataPreview:columns>
+    <dataPreview:metadata dataPreview:name="AS4TEXT" dataPreview:type="C" dataPreview:description="AS4TEXT" dataPreview:keyAttribute="false" dataPreview:colType="" dataPreview:isKeyFigure="false" dataPreview:length="60"/>
+    <dataPreview:dataSet>${rows.map(r => `<dataPreview:data>${r.AS4TEXT}</dataPreview:data>`).join("")}</dataPreview:dataSet>
+  </dataPreview:columns>
+</dataPreview:tableData>`

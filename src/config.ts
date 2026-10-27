@@ -56,6 +56,8 @@ export interface SystemConfig {
   timeout?: number
   /** When true every tool that changes the system is disabled. */
   readOnly?: boolean
+  /** false disables abap_sql_query (ADT data preview) for this system; default true. */
+  allowSql?: boolean
 }
 
 export interface Config {
@@ -151,7 +153,8 @@ function normalizeSystem(raw: Record<string, unknown>, env: NodeJS.ProcessEnv): 
     allowSelfSigned: parseBool(raw.allowSelfSigned),
     caCert: optionalString(raw.caCert, env),
     timeout,
-    readOnly: parseBool(raw.readOnly)
+    readOnly: parseBool(raw.readOnly),
+    allowSql: parseBool(raw.allowSql)
   })
 }
 
@@ -187,7 +190,8 @@ export function systemFromEnv(env: NodeJS.ProcessEnv): SystemConfig | undefined 
     allowSelfSigned: parseBool(env.SAP_ALLOW_SELF_SIGNED),
     caCert: env.SAP_CA_CERT || undefined,
     timeout: optionalNumber(env.SAP_TIMEOUT, name, "SAP_TIMEOUT"),
-    readOnly: parseBool(env.SAP_READ_ONLY)
+    readOnly: parseBool(env.SAP_READ_ONLY),
+    allowSql: parseBool(env.SAP_ALLOW_SQL)
   })
 }
 
@@ -227,6 +231,13 @@ or point ABAP_ADT_CONFIG (or --config <file>) to a JSON file such as:
       "QAS": { "url": "https://sap-qas:44300", "client": "100", "username": "DEVELOPER", "password": "\${env:SAP_QAS_PASSWORD}", "readOnly": true }
     }
   }`
+
+/** Path of the config file given by --config or ABAP_ADT_CONFIG, if any. */
+export function configFile(argv: string[], env: NodeJS.ProcessEnv): string | undefined {
+  const idx = argv.indexOf("--config")
+  const file = idx >= 0 ? argv[idx + 1] : env.ABAP_ADT_CONFIG
+  return file ? resolve(file) : undefined
+}
 
 /** Loads the configuration from CLI arguments, ABAP_ADT_CONFIG and SAP_* variables. */
 export function loadConfig(argv: string[], env: NodeJS.ProcessEnv): Config {

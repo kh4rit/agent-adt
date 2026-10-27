@@ -3,9 +3,11 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import type { Systems } from "./connection.js"
 import { CLASS_INCLUDES, label, packageOf, resolveObject, type ObjectSpec } from "./objects.js"
 import { errorMessage, plural, truncate } from "./format.js"
-import { applyEdits, formatSyntax, readSource, syntaxCheck, writeSource } from "./services/source.js"
+import { applyEdits, formatRevisions, formatSyntax, listRevisions, readRevision, readSource, syntaxCheck, writeSource } from "./services/source.js"
 import { activateInactive, activateObject, formatActivation, formatInactive, inactiveObjects } from "./services/activation.js"
-import { createTransportFor, describeTransportInfo, listTransports } from "./services/transports.js"
+import { createTransportFor, describeTransportInfo, listTransports, readTransport } from "./services/transports.js"
+import { runSqlQuery, SQL_MAX_ROWS } from "./services/data.js"
+import { odataMetadata } from "./services/odata.js"
 import { createObject, supportedCreateTypes } from "./services/create.js"
 import { findUsages, outline, packageContents, runUnitTests } from "./services/navigation.js"
 import { deployUi5App, ui5AppInfo } from "./services/ui5.js"
@@ -67,7 +69,7 @@ export function registerTools(server: McpServer, systems: Systems) {
       run(async () => {
         const lines = systems.list().map(s => {
           const c = s.config
-          return `- ${c.name}${c.name === systems.defaultName ? " (default)" : ""}: ${c.url} client ${c.client ?? "default"} user ${c.username} auth ${s.auth}${c.readOnly ? "  READ-ONLY" : ""}`
+          return `- ${c.name}${c.name === systems.defaultName ? " (default)" : ""}: ${c.url} client ${c.client ?? "default"} user ${c.username} auth ${s.auth}${c.readOnly ? "  READ-ONLY" : ""}${c.allowSql === false ? "  SQL off" : ""}`
         })
         return `Configured systems:\n${lines.join("\n")}`
       })
@@ -139,10 +141,11 @@ export function registerTools(server: McpServer, systems: Systems) {
     {
       title: "Read source code",
       description:
-        "Reads the source code of an object (class, interface, program, include, function module, CDS view ...). Returns the inactive version when unsaved changes exist, otherwise the active one. For objects without ABAP source (tables, data elements) the XML definition is returned. Use startLine/endLine on big objects.",
+        "Reads the source code of an object (class, interface, program, include, function module, CDS view ...). Returns the inactive version when unsaved changes exist, otherwise the active one. For objects without ABAP source (tables, data elements) the XML definition is returned. Use startLine/endLine on big objects. Pass `revision` to read a stored older version (see abap_list_versions).",
       inputSchema: {
         ...objectParams,
         version: z.enum(["active", "inactive"]).optional().describe("Force the active or the inactive version."),
+        revision: z.string().optional().describe("Stored version to read instead of the current source: its number from abap_list_versions (e.g. 00001) or its uri."),
         startLine: z.number().int().min(1).optional().describe("First line to return (1-based)."),
         endLine: z.number().int().min(1).optional().describe("Last line to return."),
         lineNumbers: z.boolean().optional().describe("Prefix every line with its line number (default false).")
@@ -153,6 +156,8 @@ export function registerTools(server: McpServer, systems: Systems) {
       run(async () => {
         const system = systems.get(args.system)
         const obj = await resolveObject(system, spec(args))
+        if (args.revision)
+          return readRevision(system, obj, args.revision, { startLine: args.startLine, endLine: args.endLine, lineNumbers: args.lineNumbers })
         const r = await readSource(system, obj, {
           version: args.version,
           startLine: args.startLine,
@@ -331,6 +336,26 @@ export function registerTools(server: McpServer, systems: Systems) {
   )
 
   server.registerTool(
+    "abap_read_transport",
+    {
+      title: "Read transport request",
+      description:
+        "Reads one transport request or task by number, also of other owners and released ones: description, type, owner, status, target, tasks with owners and the recorded objects (R3TR/LIMU entries, customizing table keys as CDAT/TABU).",
+      inputSchema: {
+        number: z.string().describe("Request or task number, e.g. DEVK900123."),
+        withObjects: z.boolean().optional().describe("List the recorded objects (default true)."),
+        system: systemParam
+      },
+      annotations: readOnly
+    },
+    args =>
+      run(async () => {
+        const system = systems.get(args.system)
+        return truncate(await readTransport(system, args.number, args.withObjects ?? true), 60000)
+      })
+  )
+
+  server.registerTool(
     "abap_create_transport",
     {
       title: "Create transport request",
@@ -445,6 +470,65 @@ export function registerTools(server: McpServer, systems: Systems) {
         const system = systems.get(args.system)
         const obj = await resolveObject(system, spec(args))
         return truncate(await runUnitTests(system, obj), 60000)
+      })
+  )
+
+  server.registerTool(
+    "abap_list_versions",
+    {
+      title: "List stored versions",
+      description:
+        "Lists the stored versions (version management) of an object or class include: number, date, author, transport request and its text, newest first. Read one with abap_read_source and the revision parameter, e.g. to compare with the current source.",
+      inputSchema: objectParams,
+      annotations: readOnly
+    },
+    args =>
+      run(async () => {
+        const system = systems.get(args.system)
+        const obj = await resolveObject(system, spec(args))
+        return truncate(formatRevisions(obj, await listRevisions(system, obj)), 60000)
+      })
+  )
+
+  server.registerTool(
+    "abap_sql_query",
+    {
+      title: "Run ABAP SQL query (data preview)",
+      description: `Runs a read-only ABAP SQL SELECT through ADT data preview (the SQL console of Eclipse ADT) and returns the rows as a table. Use it to read customizing and application tables, CDS views and DDIC metadata (e.g. TADIR, E070/E071, DD03L). Only SELECT is possible; SAP checks the user's authorizations, and client-dependent tables are read in the system's logon client. ABAP SQL syntax: comma separated field lists, literals in single quotes, joins with ~ (e070~trkorr); the row limit comes from maxRows, not UP TO. Do not query personal data beyond what the task needs.`,
+      inputSchema: {
+        query: z.string().describe("ABAP SQL SELECT statement, e.g. SELECT trkorr, as4text FROM e07t WHERE trkorr = 'DEVK900123'"),
+        maxRows: z.number().int().min(1).max(SQL_MAX_ROWS).optional().describe(`Maximum number of rows (default 100, max ${SQL_MAX_ROWS}).`),
+        system: systemParam
+      },
+      annotations: readOnly
+    },
+    args =>
+      run(async () => {
+        const system = systems.get(args.system)
+        return runSqlQuery(system, args.query, args.maxRows ?? 100)
+      })
+  )
+
+  server.registerTool(
+    "abap_odata_metadata",
+    {
+      title: "OData service metadata",
+      description:
+        "Fetches the $metadata (EDMX) of a Gateway OData V2 or V4 service with this server's SAP logon (works with SSO systems where curl or the Fiori tools cannot log on). Returns a summary of entity types with keys and properties, entity sets and actions/functions, or the raw XML; saveTo writes the complete document to a local file (e.g. for a Fiori app's localService mock data).",
+      inputSchema: {
+        service: z
+          .string()
+          .describe("Service path or URL, e.g. /sap/opu/odata4/sap/api_warehouse_order_task_2/srvd_a2x/sap/warehouseorder/0001/ or /sap/opu/odata/sap/API_PRODUCT_SRV. $metadata is appended."),
+        format: z.enum(["summary", "xml"]).optional().describe("summary (default) or the raw XML (truncated to 60000 characters)."),
+        saveTo: z.string().optional().describe("Local file path to write the complete $metadata to; directories are created."),
+        system: systemParam
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+    },
+    args =>
+      run(async () => {
+        const system = systems.get(args.system)
+        return odataMetadata(system, args)
       })
   )
 

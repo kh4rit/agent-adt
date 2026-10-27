@@ -42,11 +42,15 @@ registration and skill registration, follow the
 | Check syntax | `abap_syntax_check` checks current source or a supplied unsaved candidate. |
 | Inspect transport requirements | `abap_transport_info` reports the existing request lock and candidate transports. |
 | Find a transport | `abap_list_transports` lists modifiable workbench and customizing requests the user owns or has a task in (no wildcards). |
+| Inspect a transport | `abap_read_transport` reads any request or task by number (also other owners' and released ones): tasks, owners, objects. |
 | Create a transport | `abap_create_transport` creates a request for an object or package when needed for the authorized change. |
 | Create an object | `abap_create_object` creates a supported empty object; supply the package and transport, and a parent function group where required. Then write and activate its source. For a package (`DEVC/K`) pass the super package as `package`; software component and transport layer default to the super package's. |
 | Activate changes | `abap_activate` activates specified objects and returns the activation log. |
 | Inspect pending activation | `abap_inactive_objects` lists the current user's inactive objects and transports. |
 | Test behavior | `abap_run_unit_tests` runs ABAP Unit for the relevant object. |
+| Compare with an older version | `abap_list_versions` lists stored versions; `abap_read_source` with `revision` reads one. |
+| Read table contents | `abap_sql_query` runs a read-only ABAP SQL `SELECT` (data preview): customizing, transports (E070/E071), DDIC tables. Select only the fields and rows the task needs; no personal data beyond that. Data is read in the system's logon client. |
+| OData service metadata | `abap_odata_metadata` fetches `$metadata` of a published Gateway service; `saveTo` writes it to a file (e.g. `webapp/localService`). |
 | Deploy a SAPUI5 / Fiori app | `abap_deploy_ui5_app` uploads a built app (dist folder or zip) to the SAPUI5 ABAP repository. Test mode by default. A success answer may be HTTP 200, 201 or 204. |
 | Inspect a deployed SAPUI5 app | `abap_ui5_app_info` shows package, description, URL and file inventory of a BSP application. |
 
@@ -132,6 +136,7 @@ workflow above. A download request alone does not authorize remote changes.
 | TLS certificate-chain error | Use the corporate CA PEM through `caCert` / `SAP_CA_CERT` or `NODE_EXTRA_CA_CERTS`. Keep certificate verification enabled; do not fix this by enabling `allowSelfSigned`. Keep local `corp-ca.pem` out of version control. |
 | Authentication expires (401 or SAML HTML) | In SSO mode the server re-logs on and retries once. If it still fails, have the user complete logon and verify the connection. Static cookie/bearer credentials require renewal through the configured authentication mechanism. Before manually retrying a failed mutation, inspect source and transport state to see whether it took effect. |
 | Missing transport | The save tool reports that nothing was saved and lists candidate requests. Inspect transport info, select an appropriate request/task or create one within scope, then retry with `transport`. Do not move the object to a local package to bypass this requirement. |
-| `abap_list_transports` is empty but the user named a request | The list covers requests owned by, or with a task of, the configured user. Use the request the user named (check it with `abap_transport_info`), or list its owner's requests with the `user` parameter. |
+| `abap_list_transports` is empty but the user named a request | The list covers requests owned by, or with a task of, the configured user. Read the request the user named with `abap_read_transport`, check the object with `abap_transport_info`, or list its owner's requests with the `user` parameter. |
+| `abap_sql_query` is switched off | The system is configured with `allowSql: false`. Do not read the data another way; tell the user. |
 | Deployed file count is lower than uploaded | SAP skipped files matching `.Ui5RepositoryIgnore` in the archive; the deploy result mentions the file. Not an error. |
 | Read shows changes but runtime behavior is unchanged | Reads default to inactive source when present. Compare with `version: "active"`, inspect metadata or `abap_inactive_objects`, and activate the intended changes after fixing errors. Report an inactive draft accurately. |

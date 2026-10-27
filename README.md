@@ -75,6 +75,7 @@ node dist\index.js --check
 | `SAP_CA_CERT` | Path to a PEM file with your corporate CA certificate |
 | `SAP_SYSTEM_NAME` | Name shown to the agent (default `default`) |
 | `SAP_READ_ONLY` | `true` disables every tool that changes the system |
+| `SAP_ALLOW_SQL` | `false` disables `abap_sql_query` (data preview) for the system |
 | `SAP_TIMEOUT` | HTTP timeout in ms (default 120000) |
 
 ### Authentication modes
@@ -165,6 +166,8 @@ the file. Tools take an optional `system` parameter; without it the default syst
 Every `sso` system needs its own browser logon once: after adding one, run
 `node dist/index.js --sso-login --system <name>` and then `--check --system <name>`. A UTF-8
 byte order mark at the start of the file (PowerShell's default when writing files) is fine.
+The running server reloads the file when it changes (a renamed or added system is available
+without restarting the agent); systems whose settings did not change keep their session.
 
 ### Calling a tool from the command line
 
@@ -277,12 +280,16 @@ together with the other skills (`copilot skill add <repo>/skills`). Requires Nod
 | `abap_inactive_objects` | Inactive objects of the user with their transports |
 | `abap_transport_info` | Does the object need a transport, which one locks it, which ones could take it |
 | `abap_list_transports` | Modifiable workbench and customizing requests a user owns or has a task in |
+| `abap_read_transport` | One request or task by number, also of other owners: tasks, owners, recorded objects |
 | `abap_create_transport` | Create a workbench request for an object or package |
 | `abap_create_object` | Create an empty class, interface, program, include, function group/module, CDS view ..., or a package (software component and transport layer taken from the super package) |
 | `abap_find_usages` | Where-used list of an object or of the symbol at a source position |
 | `abap_package_contents` | Objects of a package grouped by type |
 | `abap_object_outline` | Methods, attributes, events of a class or interface |
 | `abap_run_unit_tests` | Run ABAP Unit and report failures |
+| `abap_list_versions` | Stored versions of an object (version management); `abap_read_source` with `revision` reads one |
+| `abap_sql_query` | Read-only ABAP SQL `SELECT` through ADT data preview (Eclipse's SQL console), rows as a table |
+| `abap_odata_metadata` | `$metadata` of a Gateway OData V2/V4 service with the server's logon: summary, raw XML, or saved to a file |
 | `abap_deploy_ui5_app` | Upload a built SAPUI5 / Fiori app (dist folder or zip) to the SAPUI5 ABAP repository; test mode by default |
 | `abap_ui5_app_info` | Package, description, URL and file inventory of a deployed SAPUI5 app |
 
@@ -353,6 +360,9 @@ from a different `sap.app/id` is only overwritten with `safeMode: false`. Adapta
 ### Safety
 
 - `readOnly: true` / `SAP_READ_ONLY=true` turns a system into a browse-only connection.
+- `abap_sql_query` can only run `SELECT` (SAP's data preview refuses anything else) and reads
+  with the user's authorizations; `allowSql: false` / `SAP_ALLOW_SQL=false` switches it off for
+  systems whose data must not reach the agent.
 - The server never deletes objects and never releases transports.
 - Passwords: use `${input:...}` prompts in VS Code or `${env:...}` placeholders in the config
   file instead of plain text.

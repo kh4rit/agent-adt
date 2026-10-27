@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0
+
+- `abap_sql_query`: read-only ABAP SQL `SELECT` through ADT data preview, rows as a table,
+  row limit (default 100, max 5000); `allowSql: false` / `SAP_ALLOW_SQL=false` switches it off
+  per system
+- `abap_read_transport`: one request or task by number, also of other owners and released ones,
+  with tasks, owners and recorded objects
+- `abap_list_versions` and `abap_read_source` with `revision`: stored versions of an object
+- `abap_odata_metadata`: `$metadata` of a Gateway OData V2/V4 service with the server's logon
+  (works with SSO), as summary, XML, or saved to a file
+- The config file is reloaded when it changes; unchanged systems keep their session
+- These cover what agents previously did by importing the server's modules or reading its
+  session cache from scripts
+
 ## 0.3.2
 
 - Name lookups: a bare type matches all subtypes (`TABL` finds structures, `PROG` includes);
