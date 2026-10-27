@@ -147,12 +147,19 @@ const isClientError = (e: unknown) => {
   return typeof status === "number" && status >= 400 && status < 500 && status !== 401
 }
 
-async function searchExact(system: AbapSystem, name: string, type?: string): Promise<SearchResult[]> {
+/** Hits of the requested type, and same-named objects of other types (for the error message). */
+async function searchExact(system: AbapSystem, name: string, type?: string): Promise<{ hits: SearchResult[]; otherTypes: SearchResult[] }> {
   const { full, short } = normalizeType(type)
   const searchType = short === "FUGR" && full === "FUGR/FF" ? "FUNC" : short
   const accept = typeMatcher(type)
+  const otherTypes: SearchResult[] = []
   const matches = (results: SearchResult[]) =>
-    results.filter(r => `${r["adtcore:name"]}`.toUpperCase() === name && accept(r["adtcore:type"]))
+    results.filter(r => {
+      if (`${r["adtcore:name"]}`.toUpperCase() !== name) return false
+      if (accept(r["adtcore:type"])) return true
+      otherTypes.push(r)
+      return false
+    })
   const tryQuery = async (q: string, t?: string) => {
     try {
       return matches(await system.reader.searchObject(q, t, 100))
@@ -166,7 +173,7 @@ async function searchExact(system: AbapSystem, name: string, type?: string): Pro
   let hits = await tryQuery(name, searchType)
   if (!hits.length) hits = await tryQuery(`${name}*`, searchType)
   if (!hits.length && searchType) hits = await tryQuery(`${name}*`)
-  return hits
+  return { hits, otherTypes: distinctObjects(otherTypes) }
 }
 
 function timestamp(ms: unknown): string | undefined {
@@ -183,7 +190,13 @@ export async function resolveObject(system: AbapSystem, spec: ObjectSpec): Promi
     ;({ objectUrl, include } = splitUri(spec.uri, include))
   } else if (spec.name?.trim()) {
     const name = spec.name.trim().toUpperCase()
-    const hits = await searchExact(system, name, spec.type)
+    const { hits, otherTypes } = await searchExact(system, name, spec.type)
+    if (!hits.length && otherTypes.length)
+      throw new ObjectNotFoundError(
+        `No object named ${name} of type ${spec.type} found in ${system.name}, but it exists as:\n` +
+          otherTypes.map(h => `  - ${describe(h)}`).join("\n") +
+          `\nPass that type or the uri.`
+      )
     if (!hits.length)
       throw new ObjectNotFoundError(
         `No object named ${name}${spec.type ? ` of type ${spec.type}` : ""} found in ${system.name}. Use abap_search_objects with a wildcard (e.g. ${name}*) to look for candidates.`

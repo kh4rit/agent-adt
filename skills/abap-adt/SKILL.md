@@ -25,6 +25,24 @@ registration and skill registration, follow the
   `dist` files from scripts, or read its session cache (`~/.abap-adt-mcp`) to
   reach SAP another way. If a needed capability is missing, tell the user what
   is missing instead of building a workaround.
+- Treat systems with real data as read-only unless the user asked for a change.
+  Ask before creating helper or probe objects, and delete `$TMP` objects you
+  created once they are no longer needed.
+
+## Safety rules
+
+- Issue changing calls (edit, write, create, activate) one at a time, never in
+  parallel. The server queues calls per system, but parallel changes still make
+  the order of changes and their results hard to follow.
+- Unit tests are for testing. Never use `abap_run_unit_tests` (or test classes
+  with `RISK LEVEL DANGEROUS`) to run code that reads or changes business data,
+  calls function modules for their effect, or works around a missing tool.
+- Never delete lock (enqueue) entries from ABAP (`ENQUE_DELETE` and similar).
+  A lock of the tool's own user is released when its SAP session ends; otherwise
+  the user deletes it in SM12.
+- `checkSyntax: false` is a deliberate escape hatch for saving work in progress,
+  not a way past errors; say so when you use it.
+- After two failed logons stop and ask the user, so the account is not locked.
 
 ## ADT tool selection
 
@@ -37,7 +55,7 @@ registration and skill registration, follow the
 | Read or download source | `abap_read_source` reads source or a DDIC XML definition; use line ranges for inspection and full source for downloads. |
 | Inspect class structure | `abap_object_outline` shows methods, attributes and events. |
 | Find dependencies | `abap_find_usages` finds uses of an object or a symbol at a source position. |
-| Make a focused edit | `abap_edit_source` applies exact replacements; each `oldText` must occur exactly once. |
+| Make a focused edit | `abap_edit_source` applies exact replacements; `edits` is an array of `{oldText, newText}`. Each `oldText` must occur exactly once, or pass `occurrence` to pick one. |
 | Replace full source | `abap_write_source` replaces the complete object or selected include, then checks syntax by default. |
 | Check syntax | `abap_syntax_check` checks current source or a supplied unsaved candidate. |
 | Inspect transport requirements | `abap_transport_info` reports the existing request lock and candidate transports. |
@@ -45,7 +63,7 @@ registration and skill registration, follow the
 | Inspect a transport | `abap_read_transport` reads any request or task by number (also other owners' and released ones): tasks, owners, objects. |
 | Create a transport | `abap_create_transport` creates a request for an object or package when needed for the authorized change. |
 | Create an object | `abap_create_object` creates a supported empty object; supply the package and transport, and a parent function group where required. Then write and activate its source. For a package (`DEVC/K`) pass the super package as `package`; software component and transport layer default to the super package's. |
-| Activate changes | `abap_activate` activates specified objects and returns the activation log. |
+| Activate changes | `abap_activate` activates one object (`name`/`type` or `uri`) or several together (`objects`), and returns the activation log. Activate dependent objects such as CDS interface and consumption views in one call. |
 | Inspect pending activation | `abap_inactive_objects` lists the current user's inactive objects and transports. |
 | Test behavior | `abap_run_unit_tests` runs ABAP Unit for the relevant object. |
 | Compare with an older version | `abap_list_versions` lists stored versions; `abap_read_source` with `revision` reads one. |
@@ -139,4 +157,7 @@ workflow above. A download request alone does not authorize remote changes.
 | `abap_list_transports` is empty but the user named a request | The list covers requests owned by, or with a task of, the configured user. Read the request the user named with `abap_read_transport`, check the object with `abap_transport_info`, or list its owner's requests with the `user` parameter. |
 | `abap_sql_query` is switched off | The system is configured with `allowSql: false`. Do not read the data another way; tell the user. |
 | Deployed file count is lower than uploaded | SAP skipped files matching `.Ui5RepositoryIgnore` in the archive; the deploy result mentions the file. Not an error. |
+| A save, edit or activation reports an error | Read the result first: when it starts with "Saved", the source is saved and only the syntax check or activation failed; do not repeat the edit. For any other error, re-read the source before retrying, because a change may have gone through. |
+| "currently editing" (EU510) for your own user | An earlier call's SAP session still holds the lock. Wait a few minutes or ask the user to delete it in SM12; do not delete it from ABAP. |
+| "Object components locked in different requests" | The object's parts are in several requests (the message names them). Show the user the requests and owners (`abap_read_transport`); they have to be merged or one released. |
 | Read shows changes but runtime behavior is unchanged | Reads default to inactive source when present. Compare with `version: "active"`, inspect metadata or `abap_inactive_objects`, and activate the intended changes after fixing errors. Report an inactive draft accurately. |

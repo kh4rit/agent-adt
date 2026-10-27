@@ -142,6 +142,15 @@ export function findBrowser(explicit?: string): string {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
+/** Adds the loopback names to NO_PROXY so Node does not proxy the browser connection. */
+export function noProxyForLoopback(env: NodeJS.ProcessEnv = process.env) {
+  for (const key of ["NO_PROXY", "no_proxy"]) {
+    const current = (env[key] ?? "").split(",").map(s => s.trim()).filter(Boolean)
+    const missing = ["127.0.0.1", "localhost"].filter(h => !current.includes(h))
+    if (missing.length) env[key] = [...current, ...missing].join(",")
+  }
+}
+
 /** Minimal Chrome DevTools Protocol client on the built-in WebSocket. */
 class Cdp {
   private nextId = 0
@@ -252,6 +261,8 @@ export async function runBrowserLogon(run: BrowserRun): Promise<StoredCookie[] |
   const spawnError = new Promise<never>((_, reject) => child.once("error", e => reject(new SsoError(`Cannot start browser ${run.exe}: ${e.message}`))))
   try {
     const { port, path } = await Promise.race([waitForDevTools(run.profileDir, 20000, child), spawnError])
+    // the DevTools socket is local: never send it through HTTP(S)_PROXY (NODE_USE_ENV_PROXY)
+    noProxyForLoopback()
     const cdp = await Cdp.connect(`ws://127.0.0.1:${port}${path}`)
     try {
       const deadline = Date.now() + run.timeoutMs
@@ -333,6 +344,7 @@ export class BrowserSsoProvider implements CookieProvider {
       // a logon that just happened serves concurrent callers that failed with the old cookies
       if (this.cache && Date.now() - this.lastLogon < 15000) return Promise.resolve(this.header(this.cache))
       this.log(`browser logon to ${this.host} (${reason})`)
+      this.pendingSince = Date.now()
       this.pending = this.logon(false).finally(() => (this.pending = undefined))
       // callers that stopped waiting must not turn a failed logon into an unhandled rejection
       this.pending.catch(() => undefined)
@@ -342,9 +354,12 @@ export class BrowserSsoProvider implements CookieProvider {
 
   /** Seconds callers wait for a running logon; undefined = until it ends. */
   waitSeconds?: number
+  private pendingSince = 0
 
   private waitFor(logon: Promise<string>): Promise<string> {
     if (this.waitSeconds === undefined) return logon
+    // queued calls share the wait of the first one instead of waiting again each
+    const remainingMs = Math.max(0, this.waitSeconds * 1000 - (Date.now() - this.pendingSince))
     let timer: NodeJS.Timeout | undefined
     const gaveUp = new Promise<never>((_, reject) => {
       timer = setTimeout(
@@ -356,7 +371,7 @@ export class BrowserSsoProvider implements CookieProvider {
                 `The window waits up to ${this.o.timeoutSeconds ?? 300}s and closes itself after the logon.`
             )
           ),
-        this.waitSeconds! * 1000
+        remainingMs
       )
       timer.unref?.()
     })

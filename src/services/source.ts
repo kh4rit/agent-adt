@@ -1,7 +1,7 @@
 import type { classIncludes, Revision, SyntaxCheckResult } from "abap-adt-api"
 import type { AbapSystem } from "../connection.js"
 import { label, type ResolvedObject } from "../objects.js"
-import { numbered, plural } from "../format.js"
+import { errorMessage, numbered, plural } from "../format.js"
 import { transportForLockedObject } from "./transports.js"
 import { activateObject, formatActivation, type ActivationSummary } from "./activation.js"
 
@@ -79,6 +79,8 @@ export async function readRevision(system: AbapSystem, obj: ResolvedObject, revi
 export interface Edit {
   oldText: string
   newText: string
+  /** 1-based occurrence to replace when oldText occurs more than once */
+  occurrence?: number
 }
 
 export class EditError extends Error {}
@@ -92,12 +94,21 @@ export function applyEdits(source: string, edits: Edit[]): { result: string; rep
     const oldText = normalize(edit.oldText)
     const newText = normalize(edit.newText)
     if (!oldText) throw new EditError(`Edit ${i + 1}: oldText must not be empty`)
-    const first = result.indexOf(oldText)
-    if (first < 0) throw new EditError(`Edit ${i + 1}: oldText not found in the current source:\n${oldText}`)
-    const second = result.indexOf(oldText, first + oldText.length)
-    if (second >= 0)
-      throw new EditError(`Edit ${i + 1}: oldText occurs more than once; include more surrounding lines to make it unique:\n${oldText}`)
-    result = result.slice(0, first) + newText + result.slice(first + oldText.length)
+    const positions: number[] = []
+    for (let at = result.indexOf(oldText); at >= 0; at = result.indexOf(oldText, at + oldText.length)) positions.push(at)
+    if (!positions.length) throw new EditError(`Edit ${i + 1}: oldText not found in the current source:\n${oldText}`)
+    let at = positions[0]
+    if (edit.occurrence !== undefined) {
+      if (edit.occurrence > positions.length)
+        throw new EditError(`Edit ${i + 1}: occurrence ${edit.occurrence} requested, but oldText occurs ${positions.length} time(s)`)
+      at = positions[edit.occurrence - 1]
+    } else if (positions.length > 1) {
+      const lines = positions.map(p => result.slice(0, p).split("\n").length)
+      throw new EditError(
+        `Edit ${i + 1}: oldText occurs ${positions.length} times (lines ${lines.join(", ")}); include more surrounding lines to make it unique, or pass occurrence:\n${oldText}`
+      )
+    }
+    result = result.slice(0, at) + newText + result.slice(at + oldText.length)
   })
   return { result, replaced: edits.length }
 }
@@ -148,19 +159,28 @@ export async function writeSource(
     await client.setObjectSource(obj.sourceUrl, normalized, lock.LOCK_HANDLE, choice.transport)
     return choice
   })
+  // from here on the source is saved: later failures must not hide that
   const out: string[] = [`Saved ${label(obj)} (inactive version)${transport ? ` in transport ${transport}` : ""}${note ? ` - ${note}` : ""}.`]
+  out.push(...system.takeUnlockProblems())
   const result: WriteResult = { transport, transportNote: note, text: "" }
   if (options.checkSyntax !== false) {
     try {
       result.syntax = await syntaxCheck(system, obj, normalized)
       out.push(formatSyntax(result.syntax, obj))
     } catch (e) {
-      out.push(`Syntax check could not be run: ${(e as Error).message}`)
+      out.push(`Syntax check could not be run: ${errorMessage(e)}`)
     }
   }
   if (options.activate) {
-    result.activation = await activateObject(system, obj)
-    out.push(formatActivation(`${obj.type} ${obj.lockName}`, result.activation))
+    try {
+      result.activation = await activateObject(system, obj)
+      out.push(formatActivation(`${obj.type} ${obj.lockName}`, result.activation))
+    } catch (e) {
+      out.push(
+        `Activation could not be run: ${errorMessage(e)}`,
+        `The source IS saved as inactive version; do not repeat the save. Activate later with abap_activate.`
+      )
+    }
   } else out.push("The object is saved but inactive. Call abap_activate to activate it.")
   result.text = out.join("\n")
   return result

@@ -4,7 +4,7 @@ import type { Systems } from "./connection.js"
 import { CLASS_INCLUDES, label, packageOf, resolveObject, type ObjectSpec } from "./objects.js"
 import { errorMessage, plural, truncate } from "./format.js"
 import { applyEdits, formatRevisions, formatSyntax, listRevisions, readRevision, readSource, syntaxCheck, writeSource } from "./services/source.js"
-import { activateInactive, activateObject, formatActivation, formatInactive, inactiveObjects } from "./services/activation.js"
+import { activateInactive, activateObject, activateTogether, formatActivation, formatInactive, inactiveObjects } from "./services/activation.js"
 import { createTransportFor, describeTransportInfo, listTransports, readTransport } from "./services/transports.js"
 import { runSqlQuery, SQL_MAX_ROWS } from "./services/data.js"
 import { odataMetadata } from "./services/odata.js"
@@ -54,9 +54,35 @@ const objectParams = {
 const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
 const writes = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
 
+const editSchema = z.object({
+  oldText: z.string().describe("Exact text to replace. Must occur exactly once, unless occurrence is given."),
+  newText: z.string().describe("Replacement text."),
+  occurrence: z.number().int().min(1).optional().describe("Which occurrence of oldText to replace (1 = first) when it occurs more than once.")
+})
+
+/** Some models send nested arrays as a JSON string: accept that too. */
+function parseEdits(edits: z.infer<typeof editSchema>[] | string): z.infer<typeof editSchema>[] {
+  if (typeof edits !== "string") return edits
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(edits)
+  } catch {
+    throw new Error("edits must be an array of {oldText, newText} objects (got a string that is not JSON)")
+  }
+  const r = z.array(editSchema).min(1).safeParse(parsed)
+  if (!r.success) throw new Error("edits must be an array of {oldText, newText} objects")
+  return r.data
+}
+
 const spec = (a: ObjectSpec & { system?: string }): ObjectSpec => ({ name: a.name, type: a.type, uri: a.uri, include: a.include })
 
-export function registerTools(server: McpServer, systems: Systems) {
+export function registerTools(mcp: McpServer, systems: Systems) {
+  // every tool call runs in the queue of its system (see AbapSystem.serialize)
+  const server = {
+    registerTool: ((name: string, config: unknown, handler: (args: any, extra: unknown) => Promise<ToolResult>) =>
+      mcp.registerTool(name, config as any, ((args: any, extra: unknown) =>
+        name === "abap_list_systems" ? handler(args, extra) : systems.serialize(args?.system, () => handler(args, extra))) as any)) as McpServer["registerTool"]
+  }
   server.registerTool(
     "abap_list_systems",
     {
@@ -201,9 +227,8 @@ export function registerTools(server: McpServer, systems: Systems) {
       inputSchema: {
         ...objectParams,
         edits: z
-          .array(z.object({ oldText: z.string().describe("Exact text to replace (must occur exactly once)."), newText: z.string().describe("Replacement text.") }))
-          .min(1)
-          .describe("Edits applied in order."),
+          .union([z.array(editSchema).min(1), z.string()])
+          .describe("Edits applied in order: an array of {oldText, newText} (a JSON string of that array is accepted too)."),
         transport: z.string().optional().describe("Transport request or task number, required for transportable objects not yet recorded in a request."),
         activate: z.boolean().optional().describe("Activate after saving (default false)."),
         checkSyntax: z.boolean().optional().describe("Run a syntax check after saving (default true).")
@@ -215,7 +240,7 @@ export function registerTools(server: McpServer, systems: Systems) {
         const system = systems.get(args.system)
         const obj = await resolveObject(system, spec(args))
         const current = await readSource(system, obj)
-        const { result, replaced } = applyEdits(current.source, args.edits)
+        const { result, replaced } = applyEdits(current.source, parseEdits(args.edits))
         if (result === current.source.replace(/\r\n/g, "\n")) return `The edits did not change ${label(obj)}; nothing saved.`
         const r = await writeSource(system, obj, result, { transport: args.transport, activate: args.activate, checkSyntax: args.checkSyntax })
         return `Applied ${plural(replaced, "edit")} to the ${current.version} version.\n${r.text}`
@@ -249,12 +274,15 @@ export function registerTools(server: McpServer, systems: Systems) {
     {
       title: "Activate objects",
       description:
-        "Activates one or more objects (or, with all=true, every inactive object of the current user) and returns the activation log: errors with object, include, line and message text. Activation of a class include activates the whole class.",
+        "Activates one object (name/type/uri), several objects (objects) or, with all=true, every inactive object of the current user, and returns the activation log: errors with object, include, line and message text. Several objects are activated together in one request, so SAP orders dependencies itself (e.g. a CDS interface view and its consumption view). Activation of a class include activates the whole class.",
       inputSchema: {
+        name: objectParams.name,
+        type: objectParams.type,
+        uri: objectParams.uri,
         objects: z
           .array(z.object({ name: objectParams.name, type: objectParams.type, uri: objectParams.uri }))
           .optional()
-          .describe("Objects to activate, each by name (+type) or uri."),
+          .describe("Objects to activate together, each by name (+type) or uri."),
         all: z.boolean().optional().describe("Activate all inactive objects of the current user instead of a list."),
         system: systemParam
       },
@@ -273,14 +301,13 @@ export function registerTools(server: McpServer, systems: Systems) {
           )
           return formatActivation(`${plural(mine.length, "inactive object")} (${mine.map(r => r.object!["adtcore:name"]).join(", ")})`, summary)
         }
-        if (!args.objects?.length) throw new Error("Pass objects to activate or all=true")
-        const out: string[] = []
-        for (const o of args.objects) {
-          const obj = await resolveObject(system, o)
-          const summary = await activateObject(system, obj)
-          out.push(formatActivation(`${obj.type} ${obj.lockName}`, summary))
-        }
-        return out.join("\n\n")
+        const list = args.objects?.length ? args.objects : args.name || args.uri ? [{ name: args.name, type: args.type, uri: args.uri }] : []
+        if (!list.length) throw new Error("Pass the object (name/type or uri), objects for several, or all=true")
+        const resolved = []
+        for (const o of list) resolved.push(await resolveObject(system, o))
+        if (resolved.length === 1) return formatActivation(`${resolved[0].type} ${resolved[0].lockName}`, await activateObject(system, resolved[0]))
+        const summary = await activateTogether(system, resolved)
+        return formatActivation(resolved.map(o => `${o.type} ${o.lockName}`).join(", "), summary)
       })
   )
 

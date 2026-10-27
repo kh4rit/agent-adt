@@ -56,19 +56,37 @@ export function summarize(result: ActivationResult): ActivationSummary {
 export async function activateObject(system: AbapSystem, obj: ResolvedObject): Promise<ActivationSummary> {
   system.assertWritable("activation")
   const client = system.reader
-  let result = await client.activate(obj.lockName, obj.lockUrl, obj.mainProgram)
+  let result = await system.retryOnCsrf(() => client.activate(obj.lockName, obj.lockUrl, obj.mainProgram), client)
   if (!result.success && result.inactive?.length && !result.messages?.some(m => /[EAX]/.test(`${m.type}`))) {
     const objects = inactiveObjectsInResults(result)
-    if (objects.length) result = await client.activate(objects)
+    if (objects.length) result = await system.retryOnCsrf(() => client.activate(objects), client)
   }
   return summarize(result)
+}
+
+/**
+ * Activates several objects in one request, like a multi-selection in Eclipse: SAP orders
+ * dependent objects (e.g. CDS views on views) itself.
+ */
+export async function activateTogether(system: AbapSystem, objects: ResolvedObject[]): Promise<ActivationSummary> {
+  system.assertWritable("activation")
+  // includes carry their main program as context, as in the single object activation
+  const list: InactiveObject[] = objects.map(o => ({
+    "adtcore:uri": o.mainProgram ? `${o.lockUrl}?context=${encodeURIComponent(o.mainProgram)}` : o.lockUrl,
+    "adtcore:type": o.type,
+    "adtcore:name": o.lockName,
+    "adtcore:parentUri": ""
+  }))
+  const client = system.reader
+  return summarize(await system.retryOnCsrf(() => client.activate(list), client))
 }
 
 /** Activates a list of inactive objects (as returned by the inactive object list). */
 export async function activateInactive(system: AbapSystem, objects: InactiveObject[]): Promise<ActivationSummary> {
   system.assertWritable("activation")
   if (!objects.length) return { success: true, messages: [], inactive: [] }
-  return summarize(await system.reader.activate(objects))
+  const client = system.reader
+  return summarize(await system.retryOnCsrf(() => client.activate(objects), client))
 }
 
 export async function inactiveObjects(system: AbapSystem): Promise<InactiveObjectRecord[]> {
@@ -76,14 +94,18 @@ export async function inactiveObjects(system: AbapSystem): Promise<InactiveObjec
   return records.filter(r => r.object)
 }
 
+/** ADT's worklist leaves out SAPUI5 / BSP repository entries; they are in table DWINACTIV. */
+const UI5_NOTE =
+  "Not covered by this list: inactive SAPUI5 / BSP repository entries (e.g. after an app deployment). Read them with abap_sql_query: SELECT uname, object, obj_name FROM dwinactiv WHERE object LIKE 'WAP%'"
+
 export function formatInactive(records: InactiveObjectRecord[], system: AbapSystem): string {
-  if (!records.length) return `No inactive objects in ${system.name}.`
+  if (!records.length) return `No inactive objects in ${system.name}.\n${UI5_NOTE}`
   const lines = records.map(r => {
     const o = r.object!
     const tr = r.transport ? `  transport ${r.transport["adtcore:name"]}` : ""
     return `- ${o["adtcore:type"]} ${o["adtcore:name"]}  user ${o.user}${o.deleted ? "  (deleted)" : ""}${tr}  ${o["adtcore:uri"]}`
   })
-  return `${plural(records.length, "inactive object")} in ${system.name}:\n${lines.join("\n")}`
+  return `${plural(records.length, "inactive object")} in ${system.name}:\n${lines.join("\n")}\n${UI5_NOTE}`
 }
 
 export function formatActivation(target: string, s: ActivationSummary): string {

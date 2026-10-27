@@ -138,7 +138,8 @@ test("test mode deployment of a new app: POST with TestMode, transport and the z
   assert.deepEqual(readZip(zip).map(e => e.path), ["Component-preload.js", "i18n/i18n.properties", "manifest.json"])
   assert.match(text, /^Test mode deployment of BSP application ZDEMO_APP to TST \(new application\)/)
   assert.match(text, /package ZDEMO, transport NPLK900010; source .*: 3 files, .* zipped, sap.app\/id demo.app/)
-  assert.match(text, /Nothing was changed on TST \(HTTP 403 is the expected answer in test mode\)\. SAP reported no errors\./)
+  assert.match(text, /Check PASSED: SAP reported no errors\. Test mode: nothing was changed on TST\./)
+  assert.doesNotMatch(text, /HTTP 403/)
   assert.match(text, /\[info\] \/UI5\/UI5_REP\/012 File manifest.json will be created\n {2}\[warning\] \/UI5\/UI5_REP\/012 Application index will be updated/)
   assert.match(text, /testMode=false/)
 })
@@ -146,7 +147,7 @@ test("test mode deployment of a new app: POST with TestMode, transport and the z
 test("test mode reports SAP errors as a failing check, real mode surfaces them as an error", async () => {
   const fake = baseFake().on("POST", `${REPOSITORY_SERVICE}/Repositories`, testModeAnswer([{ severity: "error", message: "Transport request NPLK900010 does not belong to user DEVELOPER" }]))
   const text = await deployUi5App(makeSystem(fake), { name: APP, source: appFolder(), package: "ZDEMO", transport: "NPLK900010" })
-  assert.match(text, /SAP reported errors: a real deployment would fail/)
+  assert.match(text, /Check FAILED: SAP reported errors, a real deployment would fail/)
   assert.match(text, /\[error\] .*Transport request NPLK900010 does not belong to user DEVELOPER/)
 
   const failing = baseFake().on("POST", `${REPOSITORY_SERVICE}/Repositories`, {
@@ -217,7 +218,7 @@ test("safe mode conflicts, read-only systems, inactive service and namespaced na
 
   const readOnly = makeSystem(baseFake(), { readOnly: true })
   await assert.rejects(deployUi5App(readOnly, { name: APP, source: appFolder(), package: "ZDEMO", transport: "NPLK900010", testMode: false }), /read-only/)
-  assert.match(await deployUi5App(readOnly, { name: APP, source: appFolder(), package: "ZDEMO", transport: "NPLK900010" }), /Nothing was changed/)
+  assert.match(await deployUi5App(readOnly, { name: APP, source: appFolder(), package: "ZDEMO", transport: "NPLK900010" }), /nothing was changed/i)
 
   const inactive = new FakeHttp().on("GET", APP_URL, { status: 404, statusText: "Not Found", headers: { "content-type": "text/html" }, body: "<html><body>Service cannot be reached</body></html>" })
   await assert.rejects(deployUi5App(makeSystem(inactive), { name: APP, source: appFolder(), package: "ZDEMO" }), /Could not read BSP application ZDEMO_APP from TST: HTTP 404 Not Found\n {2}Service cannot be reached\nThe SAPUI5 ABAP repository OData service .* must be active in SICF/)
@@ -240,7 +241,7 @@ test("CSRF token: fetched from the service root when the info call did not retur
     .on("POST", "/sap/bc/adt/cts/transportchecks", fx.transportChecks())
     .on("POST", `${REPOSITORY_SERVICE}/Repositories`, c => (c.headers["x-csrf-token"] === "ROOT" ? testModeAnswer([]) : { status: 403, statusText: "Forbidden", headers: { "x-csrf-token": "Required" }, body: "CSRF token validation failed" }))
   const text = await deployUi5App(makeSystem(fake), { name: APP, source: appFolder(), package: "ZDEMO", transport: "NPLK900010" })
-  assert.match(text, /Nothing was changed/)
+  assert.match(text, /nothing was changed/i)
   const uploads = fake.find("POST", `${REPOSITORY_SERVICE}/Repositories`)
   assert.equal(uploads.length, 1)
   assert.equal(uploads[0].headers["x-csrf-token"], "ROOT")

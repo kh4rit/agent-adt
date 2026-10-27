@@ -36,7 +36,9 @@ test("readSource picks the inactive version of inactive objects and slices lines
 test("applyEdits requires unique matches", () => {
   const src = "a\nb\nc\nb\n"
   assert.equal(applyEdits(src, [{ oldText: "a\nb", newText: "x" }]).result, "x\nc\nb\n")
-  assert.throws(() => applyEdits(src, [{ oldText: "b", newText: "x" }]), /more than once/)
+  assert.throws(() => applyEdits(src, [{ oldText: "b", newText: "x" }]), /occurs 2 times \(lines 2, 4\).*pass occurrence/)
+  assert.equal(applyEdits(src, [{ oldText: "b", newText: "x", occurrence: 2 }]).result, "a\nb\nc\nx\n")
+  assert.throws(() => applyEdits(src, [{ oldText: "b", newText: "x", occurrence: 3 }]), /occurrence 3 requested, but oldText occurs 2 time/)
   assert.throws(() => applyEdits(src, [{ oldText: "zzz", newText: "x" }]), /not found/)
   assert.throws(() => applyEdits(src, [{ oldText: "", newText: "x" }]), EditError)
   assert.equal(applyEdits("a\r\nb", [{ oldText: "a\nb", newText: "c" }]).result, "c")

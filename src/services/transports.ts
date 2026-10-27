@@ -133,7 +133,7 @@ export async function createTransportFor(
     devclass = target.pkg.trim().toUpperCase()
     ref = `/sap/bc/adt/packages/${encodeURIComponent(devclass.toLowerCase())}`
   } else throw new Error("Specify the object (name/uri) or the package the transport is for")
-  const number = await system.exclusive(() => system.client.createTransport(ref, description, devclass))
+  const number = await system.exclusive(() => system.retryOnCsrf(() => system.client.createTransport(ref, description, devclass)))
   if (!number) throw new Error("SAP did not return a transport number")
   return number
 }

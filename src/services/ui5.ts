@@ -349,10 +349,11 @@ export async function deployUi5App(system: AbapSystem, o: DeployOptions): Promis
   if (testMode) {
     // SAP answers a test mode upload with HTTP 403 and the check log; fiori deploy treats that as the result
     if (!ok && resp.status !== 403) throw new Error(`${head.join("\n")}\nSAP rejected the test mode upload with HTTP ${resp.status}${resp.statusText ? ` ${resp.statusText}` : ""}:\n${messages.length ? formatMessages(messages) : `  ${excerpt(resp.body) || "(empty response)"}`}`)
-    const verdict = hasErrors(messages) ? "SAP reported errors: a real deployment would fail" : "SAP reported no errors"
+    // SAP answers a test run with an error status by design; report the check, not the status
+    const verdict = hasErrors(messages) ? "Check FAILED: SAP reported errors, a real deployment would fail" : "Check PASSED: SAP reported no errors"
     return [
       ...head,
-      `Nothing was changed on ${system.name} (HTTP ${resp.status} is the expected answer in test mode). ${verdict}.`,
+      `${verdict}. Test mode: nothing was changed on ${system.name}.`,
       messages.length ? `SAP check log:\n${formatMessages(messages)}` : `SAP returned no messages${resp.body ? `: ${excerpt(resp.body, 300)}` : ""}`,
       "Call again with testMode=false to deploy for real."
     ].join("\n")

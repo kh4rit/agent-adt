@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.4.1
+
+- Tool calls of a system run one after the other when reads and writes share one SAP session
+  (sso / cookie logons). Parallel calls from the host made reads run inside another call's
+  lock session, failed with EU510 "currently editing" for the tool's own user, left locks
+  behind and could lose one of two concurrent edits
+- A lock that may survive (unlock and session end both failed) is reported with the result
+  instead of being ignored; a failed lock request ends its stateful session
+- A save whose syntax check or activation fails reports "Saved ... Activation could not be
+  run" instead of an error, so agents no longer repeat edits that already went through
+- A rejected CSRF token is renewed and the operation (lock-save-unlock, activation, creation)
+  repeated once
+- Errors: the SAPscript long text is left out; hints for EU510, components in different
+  requests (TK572, with the requests and owners), TABLES ... STRUCTURE in function module
+  signatures and proxy errors (502, ERR_PROXY_TUNNEL)
+- A typed lookup that finds nothing names the types the object exists under
+- `abap_activate` takes `name`/`type`/`uri` directly; several objects are activated in one
+  request so SAP orders dependent objects such as CDS views
+- `abap_edit_source`: `edits` may come as a JSON string; `occurrence` picks one of several
+  matches, and the error lists the lines of all matches
+- `abap_inactive_objects` notes that SAPUI5 / BSP repository entries are not in ADT's list
+- Deploy test mode reports "Check PASSED / FAILED" instead of the HTTP status
+- SSO: the browser connection on 127.0.0.1 never goes through a proxy; calls queued behind a
+  running logon share its wait
+- Skill: safety rules (no parallel changes, unit tests only for testing, no lock deletion from
+  ABAP, re-read after errors, read-only on systems with real data)
+
 ## 0.4.0
 
 - `abap_sql_query`: read-only ABAP SQL `SELECT` through ADT data preview, rows as a table,

@@ -302,6 +302,11 @@ not make the name ambiguous. Classes accept an `include` parameter (`main`, `tes
 
 ### How saving works
 
+With cookie based logons (`sso`, `cookie`) reads and writes share one SAP session, so the server
+runs the tool calls of a system one after the other, even when the agent issues them in
+parallel. Otherwise a read could run inside another call's lock session, or two saves could
+collide with each other's lock (EU510 "currently editing") or overwrite each other's change.
+
 `abap_write_source` and `abap_edit_source` reproduce what Eclipse and the VS Code extension do:
 
 1. lock the object in a stateful ADT session (for a class include the whole class is locked)

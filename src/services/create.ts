@@ -73,7 +73,7 @@ export async function createObject(system: AbapSystem, o: CreateOptions): Promis
 
   const transport = await transportForNew(system, uri, pkg, o.transport)
   const options: NewObjectOptions = { objtype, name, parentName, description: o.description, parentPath, transport, responsible: system.user }
-  await system.exclusive(() => system.client.createObject(options))
+  await system.exclusive(() => system.retryOnCsrf(() => system.client.createObject(options)))
   const text = `Created ${objtype} ${name} in package ${pkg}${transport ? ` (transport ${transport})` : ""}.\nURI: ${uri}\nThe object is an empty, inactive skeleton: read it with abap_read_source, then write the full source with abap_write_source and activate.`
   return { uri, transport, text }
 }
@@ -161,12 +161,12 @@ async function createPackage(system: AbapSystem, o: CreateOptions): Promise<Crea
   const transport = local ? "" : await transportForNew(system, uri, superPackage, o.transport)
   const body = packageXml({ name, description: o.description, superPackage, responsible: system.user, packageType, softwareComponent, transportLayer })
   await system.exclusive(() =>
-    system.client.httpClient.request("/sap/bc/adt/packages", {
+    system.retryOnCsrf(() => system.client.httpClient.request("/sap/bc/adt/packages", {
       method: "POST",
       body,
       headers: { "Content-Type": "application/vnd.sap.adt.packages.v1+xml", Accept: "application/vnd.sap.adt.packages.v1+xml, application/xml" },
       qs: transport ? { corrNr: transport } : {}
-    })
+    }))
   )
   const text =
     `Created package ${name}${superPackage ? ` in super package ${superPackage}` : ""} (${packageType}, software component ${softwareComponent}` +

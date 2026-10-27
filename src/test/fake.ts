@@ -26,6 +26,8 @@ export class FakeHttp implements HttpClient {
   private routes: Route[] = []
   /** optional hook answering a call before the routes are consulted */
   intercept?: (call: Call) => HttpResponse | undefined
+  /** milliseconds every answer takes, so concurrent calls really interleave */
+  delayMs = 0
 
   on(method: string | undefined, match: string | RegExp, reply: Reply | ((call: Call) => Reply)) {
     // later registrations win, so tests can override a default route
@@ -49,6 +51,7 @@ export class FakeHttp implements HttpClient {
       headers: (options.headers ?? {}) as Record<string, string>
     }
     this.calls.push(call)
+    if (this.delayMs) await new Promise(r => setTimeout(r, this.delayMs))
     const intercepted = this.intercept?.(call)
     if (intercepted) return intercepted
     if (call.url === "/sap/bc/adt/compatibility/graph")
